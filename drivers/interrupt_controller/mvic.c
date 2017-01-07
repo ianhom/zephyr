@@ -42,7 +42,7 @@
 
 /* includes */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/__assert.h>
 #include <misc/util.h>
@@ -161,7 +161,7 @@ static int _mvic_init(struct device *unused)
 	return 0;
 
 }
-SYS_INIT(_mvic_init, PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(_mvic_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 
 void _arch_irq_enable(unsigned int irq)

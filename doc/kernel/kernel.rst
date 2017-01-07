@@ -1,31 +1,20 @@
 .. _kernel:
 
-Zephyr Kernel Primer
-####################
+Zephyr Kernel Primer (version 2)
+################################
 
-This section describes the major features of the Zephyr kernel
-and how to use them.
+This document provides a general introduction of the Zephyr kernel's
+key capabilties and services. Additional details can be found by consulting
+the :ref:`api` and :ref:`application` documentation, and by examining
+the code in the Zephyr source tree.
 
 .. toctree::
    :maxdepth: 2
 
    overview/overview.rst
-   common/common.rst
-   microkernel/microkernel.rst
-   nanokernel/nanokernel.rst
-
-.. rubric:: Abbreviations
-
-+---------------+-------------------------------------------------------------------+
-| Abbreviations | Definition                                                        |
-+===============+===================================================================+
-| API           | Application Program Interface: typically a defined set            |
-|               | of routines and protocols for building software inputs and output |
-|               | mechanisms.                                                       |
-+---------------+-------------------------------------------------------------------+
-| ISR           | Interrupt Service Routine                                         |
-+---------------+-------------------------------------------------------------------+
-| IDT           | Interrupt Descriptor Table                                        |
-+---------------+-------------------------------------------------------------------+
-| XIP           | eXecute In Place                                                  |
-+---------------+-------------------------------------------------------------------+
+   threads/threads.rst
+   timing/timing.rst
+   memory/memory.rst
+   synchronization/synchronization.rst
+   data_passing/data_passing.rst
+   other/other.rst

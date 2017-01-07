@@ -55,8 +55,9 @@ extern "C" {
 /** I2C Ultra Fast Speed */
 #define I2C_SPEED_ULTRA			(0x5)
 
-/** For internal use. */
+/** @cond INTERNAL_HIDDEN */
 #define I2C_SPEED_MASK			(0x7 << 1)	/* 3 bits */
+/** @endcond  */
 
 /** Use 10-bit addressing. */
 #define I2C_ADDR_10_BITS		(1 << 0)
@@ -78,8 +79,9 @@ extern "C" {
 /** Read message from I2C bus. */
 #define I2C_MSG_READ			(1 << 0)
 
-/** For internal use. */
+/** @cond INTERNAL_HIDDEN */
 #define I2C_MSG_RW_MASK			(1 << 0)
+/** @endcond  */
 
 /** Send STOP after this message. */
 #define I2C_MSG_STOP			(1 << 1)
@@ -149,9 +151,8 @@ struct i2c_driver_api {
  */
 static inline int i2c_configure(struct device *dev, uint32_t dev_config)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->configure(dev, dev_config);
 }
 
@@ -171,14 +172,13 @@ static inline int i2c_configure(struct device *dev, uint32_t dev_config)
 static inline int i2c_write(struct device *dev, uint8_t *buf,
 			    uint32_t len, uint16_t addr)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 	struct i2c_msg msg;
 
 	msg.buf = buf;
 	msg.len = len;
 	msg.flags = I2C_MSG_WRITE | I2C_MSG_STOP;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->transfer(dev, &msg, 1, addr);
 }
 
@@ -198,14 +198,13 @@ static inline int i2c_write(struct device *dev, uint8_t *buf,
 static inline int i2c_read(struct device *dev, uint8_t *buf,
 			   uint32_t len, uint16_t addr)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 	struct i2c_msg msg;
 
 	msg.buf = buf;
 	msg.len = len;
 	msg.flags = I2C_MSG_READ | I2C_MSG_STOP;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->transfer(dev, &msg, 1, addr);
 }
 
@@ -228,9 +227,8 @@ static inline int i2c_transfer(struct device *dev,
 			       struct i2c_msg *msgs, uint8_t num_msgs,
 			       uint16_t addr)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->transfer(dev, msgs, num_msgs, addr);
 }
 
@@ -253,7 +251,7 @@ static inline int i2c_burst_read(struct device *dev, uint16_t dev_addr,
 				 uint8_t start_addr, uint8_t *buf,
 				 uint8_t num_bytes)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 	struct i2c_msg msg[2];
 
 	msg[0].buf = &start_addr;
@@ -264,7 +262,6 @@ static inline int i2c_burst_read(struct device *dev, uint16_t dev_addr,
 	msg[1].len = num_bytes;
 	msg[1].flags = I2C_MSG_RESTART | I2C_MSG_READ | I2C_MSG_STOP;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->transfer(dev, msg, 2, dev_addr);
 }
 
@@ -287,7 +284,7 @@ static inline int i2c_burst_write(struct device *dev, uint16_t dev_addr,
 				  uint8_t start_addr, uint8_t *buf,
 				  uint8_t num_bytes)
 {
-	struct i2c_driver_api *api;
+	const struct i2c_driver_api *api = dev->driver_api;
 	struct i2c_msg msg[2];
 
 	msg[0].buf = &start_addr;
@@ -298,7 +295,6 @@ static inline int i2c_burst_write(struct device *dev, uint16_t dev_addr,
 	msg[1].len = num_bytes;
 	msg[1].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
 
-	api = (struct i2c_driver_api *)dev->driver_api;
 	return api->transfer(dev, msg, 2, dev_addr);
 }
 

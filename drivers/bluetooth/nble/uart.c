@@ -18,7 +18,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <zephyr.h>
 #include <sections.h>
 
 #include <board.h>
@@ -31,14 +31,14 @@
 
 #include <bluetooth/log.h>
 
-#include "util.h"
+#include "../util.h"
 #include "rpc.h"
 
 #if defined(CONFIG_BLUETOOTH_NRF51_PM)
-#include "nrf51_pm.h"
+#include "../nrf51_pm.h"
 #endif
 
-#if !defined(CONFIG_BLUETOOTH_DEBUG_DRIVER)
+#if !defined(CONFIG_BLUETOOTH_DEBUG_HCI_DRIVER)
 #undef BT_DBG
 #define BT_DBG(fmt, ...)
 #endif
@@ -57,26 +57,23 @@ struct ipc_uart_header {
 #define NBLE_RX_BUF_COUNT	10
 #define NBLE_BUF_SIZE		384
 
-static struct nano_fifo rx;
-static NET_BUF_POOL(rx_pool, NBLE_RX_BUF_COUNT, NBLE_BUF_SIZE, &rx, NULL, 0);
+NET_BUF_POOL_DEFINE(rx_pool, NBLE_RX_BUF_COUNT, NBLE_BUF_SIZE, 0, NULL);
+NET_BUF_POOL_DEFINE(tx_pool, NBLE_TX_BUF_COUNT, NBLE_BUF_SIZE, 0, NULL);
 
-static struct nano_fifo tx;
-static NET_BUF_POOL(tx_pool, NBLE_TX_BUF_COUNT, NBLE_BUF_SIZE, &tx, NULL, 0);
-
-static BT_STACK_NOINIT(rx_fiber_stack, CONFIG_BLUETOOTH_RX_STACK_SIZE);
+static BT_STACK_NOINIT(rx_thread_stack, CONFIG_BLUETOOTH_RX_STACK_SIZE);
 
 static struct device *nble_dev;
 
-static struct nano_fifo rx_queue;
+static K_FIFO_DEFINE(rx_queue);
 
-static void rx_fiber(void)
+static void rx_thread(void)
 {
 	BT_DBG("Started");
 
 	while (true) {
 		struct net_buf *buf;
 
-		buf = net_buf_get_timeout(&rx_queue, 0, TICKS_UNLIMITED);
+		buf = net_buf_get(&rx_queue, K_FOREVER);
 		BT_DBG("Got buf %p", buf);
 
 		rpc_deserialize(buf);
@@ -86,7 +83,7 @@ static void rx_fiber(void)
 		/* Make sure we don't hog the CPU if the rx_queue never
 		 * gets empty.
 		 */
-		fiber_yield();
+		k_yield();
 	}
 }
 
@@ -96,11 +93,13 @@ struct net_buf *rpc_alloc_cb(uint16_t length)
 
 	BT_DBG("length %u", length);
 
-	buf = net_buf_get(&tx, sizeof(struct ipc_uart_header));
+	buf = net_buf_alloc(&tx_pool, K_FOREVER);
 	if (!buf) {
 		BT_ERR("Unable to get tx buffer");
 		return NULL;
 	}
+
+	net_buf_reserve(buf, sizeof(struct ipc_uart_header));
 
 	if (length > net_buf_tailroom(buf)) {
 		BT_ERR("Too big tx buffer requested");
@@ -185,7 +184,7 @@ static void bt_uart_isr(struct device *unused)
 				BT_ERR("Too much data to fit buffer");
 				buf = NULL;
 			} else {
-				buf = net_buf_get_timeout(&rx, 0, TICKS_NONE);
+				buf = net_buf_alloc(&rx_pool, K_NO_WAIT);
 				if (!buf) {
 					BT_ERR("No available IPC buffers");
 				}
@@ -218,10 +217,10 @@ int nble_open(void)
 {
 	BT_DBG("");
 
-	/* Initialize receive queue and start rx_fiber */
-	nano_fifo_init(&rx_queue);
-	fiber_start(rx_fiber_stack, sizeof(rx_fiber_stack),
-		    (nano_fiber_entry_t)rx_fiber, 0, 0, 7, 0);
+	/* Initialize receive queue and start rx_thread */
+	k_thread_spawn(rx_thread_stack, sizeof(rx_thread_stack),
+		       (k_thread_entry_t)rx_thread,
+		       NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 
 	uart_irq_rx_disable(nble_dev);
 	uart_irq_tx_disable(nble_dev);
@@ -250,11 +249,8 @@ static int _bt_nble_init(struct device *unused)
 		return -EINVAL;
 	}
 
-	net_buf_pool_init(rx_pool);
-	net_buf_pool_init(tx_pool);
-
 	return 0;
 }
 
-DEVICE_INIT(bt_nble, "", _bt_nble_init, NULL, NULL, NANOKERNEL,
+DEVICE_INIT(bt_nble, "", _bt_nble_init, NULL, NULL, POST_KERNEL,
 	    CONFIG_KERNEL_INIT_PRIORITY_DEVICE);

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include <nanokernel.h>
-#include <nano_private.h>
+#include <kernel.h>
+#include <kernel_structs.h>
 #include <irq_offload.h>
 
 volatile irq_offload_routine_t _offload_routine;

@@ -75,7 +75,7 @@
  * @endinternal
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <toolchain.h>
 #include <sections.h>
 #include <sys_clock.h>
@@ -83,13 +83,6 @@
 #include <arch/x86/irq_controller.h>
 #include <power.h>
 #include <device.h>
-
-#if !defined(CONFIG_KERNEL_V2)
-#ifdef CONFIG_MICROKERNEL
-#include <microkernel.h>
-#endif /* CONFIG_MICROKERNEL */
-#endif
-
 #include <board.h>
 
 /* Local APIC Timer Bits */
@@ -163,14 +156,6 @@ static uint32_t reg_timer_save;
 #ifndef CONFIG_MVIC
 static uint32_t reg_timer_cfg_save;
 #endif
-#endif
-
-/* externs */
-
-#if !defined(CONFIG_KERNEL_V2)
-#ifdef CONFIG_MICROKERNEL
-extern struct nano_stack _k_command_stack;
-#endif /* CONFIG_MICROKERNEL */
 #endif
 
 /**
@@ -264,15 +249,6 @@ static inline uint32_t initial_count_register_get(void)
 }
 #endif /* CONFIG_TICKLESS_IDLE */
 
-/**
- *
- * @brief System clock tick handler
- *
- * This routine handles the system clock tick interrupt.  A TICK_EVENT event
- * is pushed onto the microkernel stack.
- *
- * @return N/A
- */
 void _timer_int_handler(void *unused /* parameter is not used */
 				 )
 {
@@ -447,7 +423,7 @@ void _timer_idle_exit(void)
 		_sys_idle_elapsed_ticks = programmed_full_ticks;
 
 		/*
-		 * Announce elapsed ticks to the microkernel. Note we are guaranteed
+		 * Announce elapsed ticks to the kernel. Note we are guaranteed
 		 * that the timer ISR will execute before the tick event is serviced.
 		 * (The timer ISR reprograms the timer for the next tick.)
 		 */
@@ -622,11 +598,7 @@ int sys_clock_device_ctrl(struct device *port, uint32_t ctrl_command,
  *
  * @return up counter of elapsed clock cycles
  */
-#ifdef CONFIG_KERNEL_V2
 uint32_t k_cycle_get_32(void)
-#else
-uint32_t sys_cycle_get_32(void)
-#endif
 {
 	uint32_t val; /* system clock value */
 

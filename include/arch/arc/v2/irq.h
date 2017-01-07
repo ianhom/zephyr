@@ -18,7 +18,7 @@
  * @file
  * @brief ARCv2 public interrupt handling
  *
- * ARCv2 nanokernel interrupt handling interface. Included by ARC/v2/arch.h.
+ * ARCv2 kernel interrupt handling interface. Included by arc/arch.h.
  */
 
 #ifndef _ARCH_ARC_V2_IRQ__H_
@@ -35,7 +35,6 @@ extern "C" {
 
 #ifdef _ASMLANGUAGE
 GTEXT(_irq_exit);
-GTEXT(_arch_irq_connect)
 GTEXT(_arch_irq_enable)
 GTEXT(_arch_irq_disable)
 #else
@@ -81,7 +80,7 @@ static ALWAYS_INLINE unsigned int _arch_irq_lock(void)
 {
 	unsigned int key;
 
-	__asm__ volatile("clri %0" : "=r"(key));
+	__asm__ volatile("clri %0" : "=r"(key):: "memory");
 	return key;
 }
 
@@ -100,7 +99,7 @@ static ALWAYS_INLINE unsigned int _arch_irq_lock(void)
 
 static ALWAYS_INLINE void _arch_irq_unlock(unsigned int key)
 {
-	__asm__ volatile("seti %0" : : "ir"(key));
+	__asm__ volatile("seti %0" : : "ir"(key) : "memory");
 }
 
 #endif /* _ASMLANGUAGE */

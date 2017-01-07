@@ -38,12 +38,7 @@ GTEXT(_timer_int_handler)
 #include <device.h>
 
 extern int _sys_clock_driver_init(struct device *device);
-/*
- * Timer interrupt handler is one of the routines that the driver
- * has to implement, but it is not necessarily an external function.
- * The driver may implement it and use only when setting an
- * interrupt handler by calling irq_connect.
- */
+
 extern void _timer_int_handler(void *arg);
 
 #ifdef CONFIG_SYSTEM_CLOCK_DISABLE
@@ -55,51 +50,21 @@ extern void _timer_idle_enter(int32_t ticks);
 extern void _timer_idle_exit(void);
 #endif /* CONFIG_TICKLESS_IDLE */
 
-#ifndef CONFIG_KERNEL_V2
-extern uint32_t _nano_get_earliest_deadline(void);
-#endif /* CONFIG_KERNEL_V2 */
-
 extern void _nano_sys_clock_tick_announce(int32_t ticks);
 
 extern int sys_clock_device_ctrl(struct device *device,
 				 uint32_t ctrl_command, void *context);
 
 /*
- * Currently regarding timers, only loapic timer implements
+ * Currently regarding timers, only loapic timer and arcv2_timer0 implements
  * device pm functionality. For other timers, use default handler in case
  * the app enables CONFIG_DEVICE_POWER_MANAGEMENT.
  */
-#ifndef CONFIG_LOAPIC_TIMER
-#define sys_clock_device_ctrl device_control_nop
+#if !defined(CONFIG_LOAPIC_TIMER) && !defined(CONFIG_ARCV2_TIMER)
+#define sys_clock_device_ctrl device_pm_control_nop
 #endif
 
 extern int32_t _sys_idle_elapsed_ticks;
-#if !defined(CONFIG_KERNEL_V2) && defined(CONFIG_MICROKERNEL)
-extern void (*_do_sys_clock_tick_announce)(kevent_t);
-
-#define _sys_clock_tick_announce() _do_sys_clock_tick_announce(TICK_EVENT)
-
-/**
- * @brief Account for the tick due to the timer interrupt
- *
- * @return N/A
- */
-static inline void _sys_clock_final_tick_announce(void)
-{
-	/*
-	 * Ticks are annnounced at interrupt level but processed later in
-	 * the kernel server fiber. Increment '_sys_idle_elapsed_ticks' as
-	 * some ticks may have previously been announced by _timer_idle_exit()
-	 * (if tickless idle is enabled) but not yet processed.
-	 */
-	_sys_idle_elapsed_ticks++;
-
-	/* If no ticks were previously announced, announce the tick now. */
-	if (_sys_idle_elapsed_ticks == 1) {
-		_sys_clock_tick_announce();
-	}
-}
-#else
 #define _sys_clock_tick_announce() \
 		_nano_sys_clock_tick_announce(_sys_idle_elapsed_ticks)
 
@@ -117,7 +82,6 @@ static inline void _sys_clock_final_tick_announce(void)
 	_sys_idle_elapsed_ticks = 1;
 	_sys_clock_tick_announce();
 }
-#endif
 #endif /* _ASMLANGUAGE */
 
 #ifdef __cplusplus

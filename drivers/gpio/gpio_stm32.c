@@ -16,7 +16,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <soc.h>
 #include <gpio.h>
@@ -69,14 +69,12 @@ static int gpio_stm32_config(struct device *dev, int access_op,
 		return map_res;
 	}
 
-	if (stm32_gpio_configure(cfg->base, pin, pincfg)) {
+	if (stm32_gpio_configure(cfg->base, pin, pincfg, 0)) {
 		return -EIO;
 	}
 
 	if (flags & GPIO_INT) {
-		struct device *exti = device_get_binding(STM32_EXTI_NAME);
-
-		stm32_exti_set_callback(exti, pin, gpio_stm32_isr, dev);
+		stm32_exti_set_callback(pin, gpio_stm32_isr, dev);
 
 		stm32_gpio_enable_int(cfg->port, pin);
 
@@ -92,10 +90,10 @@ static int gpio_stm32_config(struct device *dev, int access_op,
 				edge = STM32_EXTI_TRIG_FALLING;
 			}
 
-			stm32_exti_trigger(exti, pin, edge);
+			stm32_exti_trigger(pin, edge);
 		}
 
-		stm32_exti_enable(exti, pin);
+		stm32_exti_enable(pin);
 	}
 
 	return 0;
@@ -172,7 +170,7 @@ static int gpio_stm32_disable_callback(struct device *dev,
 	return 0;
 }
 
-static struct gpio_driver_api gpio_stm32_driver = {
+static const struct gpio_driver_api gpio_stm32_driver = {
 	.config = gpio_stm32_config,
 	.write = gpio_stm32_write,
 	.read = gpio_stm32_read,
@@ -200,13 +198,20 @@ static int gpio_stm32_init(struct device *device)
 	struct device *clk =
 		device_get_binding(STM32_CLOCK_CONTROL_NAME);
 
+#if defined(CONFIG_SOC_SERIES_STM32F1X) || defined(CONFIG_SOC_SERIES_STM32L4X)
 	clock_control_on(clk, cfg->clock_subsys);
+#elif CONFIG_SOC_SERIES_STM32F4X
+	clock_control_on(clk, (clock_control_subsys_t *) &cfg->pclken);
+#endif
 
 	return 0;
 }
 
+#if defined(CONFIG_SOC_SERIES_STM32F1X) || defined(CONFIG_SOC_SERIES_STM32L4X)
+
+/* TODO: Change F1 to work similarly to F4 */
 #define GPIO_DEVICE_INIT(__name, __suffix, __base_addr, __port, __clock) \
-static struct gpio_stm32_config gpio_stm32_cfg_## __suffix = {		\
+static const struct gpio_stm32_config gpio_stm32_cfg_## __suffix = {	\
 	.base = (uint32_t *)__base_addr,				\
 	.port = __port,							\
 	.clock_subsys = UINT_TO_POINTER(__clock),			\
@@ -217,15 +222,38 @@ DEVICE_AND_API_INIT(gpio_stm32_## __suffix,				\
 		    gpio_stm32_init,					\
 		    &gpio_stm32_data_## __suffix,			\
 		    &gpio_stm32_cfg_## __suffix,			\
-		    SECONDARY,						\
+		    POST_KERNEL,						\
 		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,			\
 		    &gpio_stm32_driver);
+
+#elif CONFIG_SOC_SERIES_STM32F4X
+
+#define GPIO_DEVICE_INIT(__name, __suffix, __base_addr, __port, __cenr)	\
+static const struct gpio_stm32_config gpio_stm32_cfg_## __suffix = {		\
+	.base = (uint32_t *)__base_addr,				\
+	.port = __port,							\
+	.pclken = { .bus = STM32F4X_CLOCK_BUS_AHB1, .enr = __cenr },	\
+};									\
+static struct gpio_stm32_data gpio_stm32_data_## __suffix;		\
+DEVICE_AND_API_INIT(gpio_stm32_## __suffix,				\
+		    __name,						\
+		    gpio_stm32_init,					\
+		    &gpio_stm32_data_## __suffix,			\
+		    &gpio_stm32_cfg_## __suffix,			\
+		    POST_KERNEL,						\
+		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,			\
+		    &gpio_stm32_driver);
+#endif
 
 #ifdef CONFIG_GPIO_STM32_PORTA
 GPIO_DEVICE_INIT("GPIOA", a, GPIOA_BASE, STM32_PORTA,
 #ifdef CONFIG_SOC_SERIES_STM32F1X
 		STM32F10X_CLOCK_SUBSYS_IOPA
 		| STM32F10X_CLOCK_SUBSYS_AFIO
+#elif CONFIG_SOC_SERIES_STM32F4X
+		STM32F4X_CLOCK_ENABLE_GPIOA
+#elif defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOA
 #endif
 	);
 #endif /* CONFIG_GPIO_STM32_PORTA */
@@ -235,6 +263,10 @@ GPIO_DEVICE_INIT("GPIOB", b, GPIOB_BASE, STM32_PORTB,
 #ifdef CONFIG_SOC_SERIES_STM32F1X
 		STM32F10X_CLOCK_SUBSYS_IOPB
 		| STM32F10X_CLOCK_SUBSYS_AFIO
+#elif CONFIG_SOC_SERIES_STM32F4X
+		STM32F4X_CLOCK_ENABLE_GPIOB
+#elif defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOB
 #endif
 	);
 #endif /* CONFIG_GPIO_STM32_PORTB */
@@ -244,6 +276,10 @@ GPIO_DEVICE_INIT("GPIOC", c, GPIOC_BASE, STM32_PORTC,
 #ifdef CONFIG_SOC_SERIES_STM32F1X
 		STM32F10X_CLOCK_SUBSYS_IOPC
 		| STM32F10X_CLOCK_SUBSYS_AFIO
+#elif CONFIG_SOC_SERIES_STM32F4X
+		STM32F4X_CLOCK_ENABLE_GPIOC
+#elif defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOC
 #endif
 );
 #endif /* CONFIG_GPIO_STM32_PORTC */
@@ -253,6 +289,10 @@ GPIO_DEVICE_INIT("GPIOD", d, GPIOD_BASE, STM32_PORTD,
 #ifdef CONFIG_SOC_SERIES_STM32F1X
 		STM32F10X_CLOCK_SUBSYS_IOPD
 		| STM32F10X_CLOCK_SUBSYS_AFIO
+#elif CONFIG_SOC_SERIES_STM32F4X
+		STM32F4X_CLOCK_ENABLE_GPIOD
+#elif defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOD
 #endif
 	);
 #endif /* CONFIG_GPIO_STM32_PORTD */
@@ -262,6 +302,34 @@ GPIO_DEVICE_INIT("GPIOE", e, GPIOE_BASE, STM32_PORTE,
 #ifdef CONFIG_SOC_SERIES_STM32F1X
 		STM32F10X_CLOCK_SUBSYS_IOPE
 		| STM32F10X_CLOCK_SUBSYS_AFIO
+#elif CONFIG_SOC_SERIES_STM32F4X
+		STM32F4X_CLOCK_ENABLE_GPIOE
+#elif defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOE
 #endif
 	);
 #endif /* CONFIG_GPIO_STM32_PORTE */
+
+#ifdef CONFIG_GPIO_STM32_PORTF
+GPIO_DEVICE_INIT("GPIOF", f, GPIOF_BASE, STM32_PORTF,
+#if defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOF
+#endif
+	);
+#endif /* CONFIG_GPIO_STM32_PORTF */
+
+#ifdef CONFIG_GPIO_STM32_PORTG
+GPIO_DEVICE_INIT("GPIOG", g, GPIOG_BASE, STM32_PORTG,
+#if defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOG
+#endif
+	);
+#endif /* CONFIG_GPIO_STM32_PORTG */
+
+#ifdef CONFIG_GPIO_STM32_PORTH
+GPIO_DEVICE_INIT("GPIOH", h, GPIOH_BASE, STM32_PORTH,
+#if defined(CONFIG_SOC_SERIES_STM32L4X)
+		STM32L4X_CLOCK_SUBSYS_GPIOH
+#endif
+	);
+#endif /* CONFIG_GPIO_STM32_PORTH */

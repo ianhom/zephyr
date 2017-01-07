@@ -111,44 +111,18 @@ SECTIONS {
 		_image_text_end = .;
 	} GROUP_LINK_IN(ROMABLE_REGION)
 
-	SECTION_PROLOGUE (devconfig, (OPTIONAL),)
-	{
-		__devconfig_start = .;
-		*(".devconfig.*")
-		KEEP(*(SORT_BY_NAME(".devconfig*")))
-		__devconfig_end = .;
-	} GROUP_LINK_IN(ROMABLE_REGION)
-
-#ifdef CONFIG_CPLUSPLUS
-	SECTION_PROLOGUE(_CTOR_SECTION_NAME,,) {
-		/*
-		 * The compiler fills the constructor pointers table below, hence
-		 * symbol __CTOR_LIST__ must be aligned on 4 byte boundary.
-		 * To align with the C++ standard, the first element of the array
-		 * contains the number of actual constructors. The last element is
-		 * NULL.
-		 */
-		. = ALIGN(4);
-		__CTOR_LIST__ = .;
-		LONG((__CTOR_END__ - __CTOR_LIST__) / 4 - 2)
-		KEEP(*(SORT_BY_NAME(".ctors*")))
-		LONG(0)
-		__CTOR_END__ = .;
-	} GROUP_LINK_IN(ROMABLE_REGION)
-
-	SECTION_PROLOGUE(init_array, (OPTIONAL),)
-	{
-		. = ALIGN(4);
-		__init_array_start = .;
-		KEEP(*(SORT_BY_NAME(".init_array*")))
-		__init_array_end = .;
-	} GROUP_LINK_IN(ROMABLE_REGION)
-#endif
+#include <linker/common-rom.ld>
 
 	SECTION_PROLOGUE(_RODATA_SECTION_NAME,,) {
 		*(.rodata)
 		*(".rodata.*")
 		*(.gnu.linkonce.r.*)
+
+#ifdef CONFIG_CUSTOM_RODATA_LD
+/* Located in project source directory */
+#include <custom-rodata.ld>
+#endif
+
 	} GROUP_LINK_IN(ROMABLE_REGION)
 
 	_image_rom_end = .;
@@ -167,59 +141,14 @@ SECTIONS {
 		*(.data)
 		*(".data.*")
 
+#ifdef CONFIG_CUSTOM_RWDATA_LD
+/* Located in project source directory */
+#include <custom-rwdata.ld>
+#endif
+
 	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
 
-	SECTION_DATA_PROLOGUE(initlevel, (OPTIONAL),)
-	{
-		DEVICE_INIT_SECTIONS()
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
-
-SECTION_DATA_PROLOGUE (_k_task_list, (OPTIONAL),)
-	{
-		_k_task_list_start = .;
-			*(._k_task_list.public.*)
-			*(._k_task_list.private.*)
-		_k_task_list_idle_start = .;
-			*(._k_task_list.idle.*)
-		KEEP(*(SORT_BY_NAME("._k_task_list*")))
-		_k_task_list_end = .;
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
-
-	SECTION_DATA_PROLOGUE (_k_task_ptr, (OPTIONAL),)
-	{
-		_k_task_ptr_start = .;
-			*(._k_task_ptr.public.*)
-			*(._k_task_ptr.private.*)
-			*(._k_task_ptr.idle.*)
-		KEEP(*(SORT_BY_NAME("._k_task_ptr*")))
-		_k_task_ptr_end = .;
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
-
-	SECTION_DATA_PROLOGUE (_k_pipe_ptr, (OPTIONAL),)
-	{
-		_k_pipe_ptr_start = .;
-			*(._k_pipe_ptr.public.*)
-			*(._k_pipe_ptr.private.*)
-		KEEP(*(SORT_BY_NAME("._k_pipe_ptr*")))
-		_k_pipe_ptr_end = .;
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
-
-	SECTION_DATA_PROLOGUE (_k_mem_map_ptr, (OPTIONAL),)
-	{
-		_k_mem_map_ptr_start = .;
-			*(._k_mem_map_ptr.public.*)
-			*(._k_mem_map_ptr.private.*)
-		KEEP(*(SORT_BY_NAME("._k_mem_map_ptr*")))
-		_k_mem_map_ptr_end = .;
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
-
-	SECTION_DATA_PROLOGUE(_k_event_list, (OPTIONAL),)
-	{
-		_k_event_list_start = .;
-			*(._k_event_list.event.*)
-		KEEP(*(SORT_BY_NAME("._k_event_list*")))
-		_k_event_list_end = .;
-	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
+#include <linker/common-ram.ld>
 
 	__data_ram_end = .;
 
@@ -265,5 +194,10 @@ SECTION_DATA_PROLOGUE (_k_task_list, (OPTIONAL),)
 		DEVICE_INIT_UNDEFINED_SECTION()
 	}
 	ASSERT(SIZEOF(initlevel_error) == 0, "Undefined initialization levels used.")
+
+#ifdef CONFIG_CUSTOM_SECTIONS_LD
+/* Located in project source directory */
+#include <custom-sections.ld>
+#endif
 
 	}

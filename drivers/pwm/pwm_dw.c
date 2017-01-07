@@ -29,7 +29,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <board.h>
 #include <pwm.h>
 
@@ -83,7 +83,7 @@ struct pwm_dw_config {
  */
 static inline int pwm_dw_timer_base_addr(struct device *dev, uint32_t timer)
 {
-	struct pwm_dw_config * const cfg =
+	const struct pwm_dw_config * const cfg =
 	    (struct pwm_dw_config *)dev->config->config_info;
 
 	return (cfg->addr + (timer * REG_OFFSET));
@@ -99,7 +99,7 @@ static inline int pwm_dw_timer_base_addr(struct device *dev, uint32_t timer)
  */
 static inline int pwm_dw_timer_ldcnt2_addr(struct device *dev, uint32_t timer)
 {
-	struct pwm_dw_config * const cfg =
+	const struct pwm_dw_config * const cfg =
 	    (struct pwm_dw_config *)dev->config->config_info;
 
 	return (cfg->addr + REG_TMR_LOAD_CNT2 + (timer * REG_OFFSET_LOAD_CNT2));
@@ -163,9 +163,9 @@ static int __set_one_port(struct device *dev, uint32_t pwm,
  * @return 0
  */
 static int pwm_dw_set_values(struct device *dev, int access_op,
-				  uint32_t pwm, uint32_t on, uint32_t off)
+			     uint32_t pwm, uint32_t on, uint32_t off)
 {
-	struct pwm_dw_config * const cfg =
+	const struct pwm_dw_config * const cfg =
 	    (struct pwm_dw_config *)dev->config->config_info;
 	int i;
 
@@ -232,7 +232,7 @@ static struct pwm_dw_config pwm_dw_cfg = {
 
 DEVICE_AND_API_INIT(pwm_dw_0, CONFIG_PWM_DW_0_DRV_NAME, pwm_dw_init,
 		    NULL, &pwm_dw_cfg,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &pwm_dw_drv_api_funcs);
 
 #endif /* CONFIG_PWM_DW */

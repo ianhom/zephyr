@@ -40,6 +40,9 @@ extern "C" {
 
 /* GATT attribute permission bit field values */
 enum {
+	/** No operations supported, e.g. for notify-only */
+	BT_GATT_PERM_NONE = 0,
+
 	/** Attribute read permission. */
 	BT_GATT_PERM_READ = BIT(0),
 
@@ -497,7 +500,8 @@ struct _bt_gatt_ccc {
 	struct bt_gatt_ccc_cfg	*cfg;
 	size_t			cfg_len;
 	uint16_t		value;
-	void			(*cfg_changed)(uint16_t value);
+	void			(*cfg_changed)(const struct bt_gatt_attr *attr,
+					       uint16_t value);
 };
 
 /** @brief Read Client Characteristic Configuration Attribute helper.
@@ -771,7 +775,8 @@ struct bt_gatt_discover_params;
  *
  *  If discovery procedure has completed this callback will be called with
  *  attr set to NULL. This will not happen if procedure was stopped by returning
- *  BT_GATT_ITER_STOP.
+ *  BT_GATT_ITER_STOP. The attribute is read-only and cannot be cached without
+ *  copying its contents.
  *
  *  @return BT_GATT_ITER_CONTINUE if should continue attribute discovery
  *  or BT_GATT_ITER_STOP to stop discovery procedure.

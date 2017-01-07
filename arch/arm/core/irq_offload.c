@@ -18,7 +18,7 @@
  * @file Software interrupts utility code - ARM implementation
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <irq_offload.h>
 
 static irq_offload_routine_t offload_routine;
@@ -38,7 +38,7 @@ void irq_offload(irq_offload_routine_t routine, void *parameter)
 	offload_routine = routine;
 	offload_param = parameter;
 
-	__asm__ volatile ("svc #1");
+	__asm__ volatile ("svc #1" : : : "memory");
 
 	irq_unlock(key);
 }

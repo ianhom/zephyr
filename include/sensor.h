@@ -39,19 +39,12 @@ extern "C" {
 
 /** @brief Sensor value types. */
 enum sensor_value_type {
-	/** val1 contains an integer value, val2 is unused. */
-	SENSOR_VALUE_TYPE_INT,
 	/**
 	 * val1 contains an integer value, val2 is the fractional value.
 	 * To obtain the final value, use the formula: val1 + val2 *
 	 * 10^(-6).
 	 */
 	SENSOR_VALUE_TYPE_INT_PLUS_MICRO,
-	/**
-	 * @brief val1 contains a Q16.16 representation, val2 is
-	 * unused.
-	 */
-	SENSOR_VALUE_TYPE_Q16_16,
 	/** @brief dval contains a floating point value. */
 	SENSOR_VALUE_TYPE_DOUBLE,
 };
@@ -150,6 +143,12 @@ enum sensor_trigger_type {
 	 * attributes.
 	 */
 	SENSOR_TRIG_THRESHOLD,
+
+	/** Trigger fires when a single tap is detected. */
+	SENSOR_TRIG_TAP,
+
+	/** Trigger fires when a double tap is detected. */
+	SENSOR_TRIG_DOUBLE_TAP,
 };
 
 /**
@@ -269,9 +268,8 @@ static inline int sensor_attr_set(struct device *dev,
 				  enum sensor_attribute attr,
 				  const struct sensor_value *val)
 {
-	struct sensor_driver_api *api;
+	const struct sensor_driver_api *api = dev->driver_api;
 
-	api = (struct sensor_driver_api *)dev->driver_api;
 	if (!api->attr_set) {
 		return -ENOTSUP;
 	}
@@ -298,9 +296,8 @@ static inline int sensor_trigger_set(struct device *dev,
 				     struct sensor_trigger *trig,
 				     sensor_trigger_handler_t handler)
 {
-	struct sensor_driver_api *api;
+	const struct sensor_driver_api *api = dev->driver_api;
 
-	api = (struct sensor_driver_api *)dev->driver_api;
 	if (!api->trigger_set) {
 		return -ENOTSUP;
 	}
@@ -326,9 +323,7 @@ static inline int sensor_trigger_set(struct device *dev,
  */
 static inline int sensor_sample_fetch(struct device *dev)
 {
-	struct sensor_driver_api *api;
-
-	api = (struct sensor_driver_api *)dev->driver_api;
+	const struct sensor_driver_api *api = dev->driver_api;
 
 	return api->sample_fetch(dev, SENSOR_CHAN_ALL);
 }
@@ -355,9 +350,7 @@ static inline int sensor_sample_fetch(struct device *dev)
 static inline int sensor_sample_fetch_chan(struct device *dev,
 					   enum sensor_channel type)
 {
-	struct sensor_driver_api *api;
-
-	api = (struct sensor_driver_api *)dev->driver_api;
+	const struct sensor_driver_api *api = dev->driver_api;
 
 	return api->sample_fetch(dev, type);
 }
@@ -387,9 +380,7 @@ static inline int sensor_channel_get(struct device *dev,
 				     enum sensor_channel chan,
 				     struct sensor_value *val)
 {
-	struct sensor_driver_api *api;
-
-	api = (struct sensor_driver_api *)dev->driver_api;
+	const struct sensor_driver_api *api = dev->driver_api;
 
 	return api->channel_get(dev, chan, val);
 }

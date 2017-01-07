@@ -55,8 +55,14 @@ static ALWAYS_INLINE int _IsInIsr(void)
 	/*
 	 * IRQs + PendSV (14) + SVC (11) + SYSTICK (15) are interrupts.
 	 * Vectors 12 and 13 are reserved, we'll never be in there
+	 * On ARMv6-M there is no nested execution bit, so we check exception 3,
+	 * hard fault, to a detect a nested exception.
 	 */
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	return (vector > 10) || (vector == 3);
+#else
 	return (vector > 10) || (vector && _ScbIsNestedExc());
+#endif /* CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 
 /**
@@ -72,14 +78,20 @@ static ALWAYS_INLINE int _IsInIsr(void)
 static ALWAYS_INLINE void _ExcSetup(void)
 {
 	_ScbExcPrioSet(_EXC_PENDSV, _EXC_PRIO(0xff));
-	_ScbExcPrioSet(_EXC_SVC, _EXC_PRIO(0x01));
-	_ScbExcPrioSet(_EXC_MPU_FAULT, _EXC_PRIO(0x01));
-	_ScbExcPrioSet(_EXC_BUS_FAULT, _EXC_PRIO(0x01));
-	_ScbExcPrioSet(_EXC_USAGE_FAULT, _EXC_PRIO(0x01));
+
+#ifdef CONFIG_CPU_CORTEX_M_HAS_BASEPRI
+	_ScbExcPrioSet(_EXC_SVC, _EXC_PRIO(_EXC_SVC_PRIO));
+#endif
+
+#ifdef CONFIG_CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS
+	_ScbExcPrioSet(_EXC_MPU_FAULT, _EXC_PRIO(_EXC_FAULT_PRIO));
+	_ScbExcPrioSet(_EXC_BUS_FAULT, _EXC_PRIO(_EXC_FAULT_PRIO));
+	_ScbExcPrioSet(_EXC_USAGE_FAULT, _EXC_PRIO(_EXC_FAULT_PRIO));
 
 	_ScbUsageFaultEnable();
 	_ScbBusFaultEnable();
 	_ScbMemFaultEnable();
+#endif
 }
 
 #endif /* _ASMLANGUAGE */

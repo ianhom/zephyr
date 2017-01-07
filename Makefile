@@ -1,6 +1,6 @@
 VERSION_MAJOR 	   = 1
-VERSION_MINOR 	   = 5
-PATCHLEVEL 	   = 0
+VERSION_MINOR 	   = 6
+PATCHLEVEL 	   = 99
 VERSION_RESERVED   = 0
 EXTRAVERSION       =
 NAME 		   = Zephyr Kernel
@@ -316,8 +316,15 @@ OBJDUMP		= $(CROSS_COMPILE)objdump
 GDB		= $(CROSS_COMPILE)gdb
 READELF		= $(CROSS_COMPILE)readelf
 AWK		= awk
+ifeq ($(PREBUILT_HOST_TOOLS),)
 GENIDT		= scripts/gen_idt/gen_idt
 GENOFFSET_H	= scripts/gen_offset_header/gen_offset_header
+FIXDEP		= scripts/basic/fixdep
+else
+GENIDT		= $(PREBUILT_HOST_TOOLS)/gen_idt
+GENOFFSET_H	= $(PREBUILT_HOST_TOOLS)/gen_offset_header
+FIXDEP		= $(PREBUILT_HOST_TOOLS)/fixdep
+endif
 PERL		= perl
 PYTHON		= python
 CHECK		= sparse
@@ -351,16 +358,18 @@ BOARD_NAME = $(subst $(DQUOTE),,$(CONFIG_BOARD))
 KERNEL_NAME = $(subst $(DQUOTE),,$(CONFIG_KERNEL_BIN_NAME))
 KERNEL_ELF_NAME = $(KERNEL_NAME).elf
 KERNEL_BIN_NAME = $(KERNEL_NAME).bin
+KERNEL_HEX_NAME = $(KERNEL_NAME).hex
 KERNEL_STAT_NAME = $(KERNEL_NAME).stat
 
 export SOC_FAMILY SOC_SERIES SOC_PATH SOC_NAME BOARD_NAME
-export ARCH KERNEL_NAME KERNEL_ELF_NAME KERNEL_BIN_NAME
+export ARCH KERNEL_NAME KERNEL_ELF_NAME KERNEL_BIN_NAME KERNEL_HEX_NAME
 # Use ZEPHYRINCLUDE when you must reference the include/ directory.
 # Needed to be compatible with the O= option
 ZEPHYRINCLUDE    = \
+		-I$(srctree)/kernel/include \
 		-I$(srctree)/arch/$(ARCH)/include \
 		-I$(srctree)/arch/$(ARCH)/soc/$(SOC_PATH) \
-		-I$(srctree)/boards/$(BOARD_NAME) \
+		-I$(srctree)/boards/$(ARCH)/$(BOARD_NAME) \
 		$(if $(KBUILD_SRC), -I$(srctree)/include) \
 		-I$(srctree)/include \
 		-I$(CURDIR)/include/generated \
@@ -368,11 +377,14 @@ ZEPHYRINCLUDE    = \
 		$(USERINCLUDE) \
 		$(STDINCLUDE)
 
-KBUILD_CPPFLAGS := -DKERNEL
+KBUILD_CPPFLAGS := -DKERNEL -D__ZEPHYR__=1
 
 KBUILD_CFLAGS   := -c -g -std=c99 \
 		-fno-asynchronous-unwind-tables \
 		-Wall \
+		-Wformat \
+		-Wformat-security \
+		-D_FORTIFY_SOURCE=2 \
 		-Wno-format-zero-length \
 		-Wno-main -ffreestanding
 
@@ -405,7 +417,7 @@ exports += HOSTCXX HOSTCXXFLAGS CHECK CHECKFLAGS
 
 exports += KBUILD_CPPFLAGS NOSTDINC_FLAGS ZEPHYRINCLUDE OBJCOPYFLAGS LDFLAGS
 exports += KBUILD_CFLAGS KBUILD_CXXFLAGS CFLAGS_GCOV KBUILD_AFLAGS AFLAGS_KERNEL
-exports += KBUILD_ARFLAGS
+exports += KBUILD_ARFLAGS FIXDEP
 
 # Push the exports to sub-processes
 export $(exports)
@@ -420,8 +432,8 @@ define filechk_Makefile.export
 	(echo "# file is auto-generated, do not modify !"; \
 	echo "BOARD=$(BOARD)"; \
 	echo; \
-	$(foreach e,$(exports),echo $(e)=$($e);) echo; \
-	echo "include $(O)/.config";)
+	$(foreach e,$(exports),echo $(e)=$($(e));) echo; \
+	echo "include $(O)/include/config/auto.conf";)
 endef
 
 # Files to ignore in find ... statements
@@ -437,10 +449,14 @@ export RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn \
 
 # Basic helpers built in scripts/
 PHONY += scripts_basic
+ifeq ($(PREBUILT_HOST_TOOLS),)
 scripts_basic:
 	$(Q)$(MAKE) $(build)=scripts/basic
 	$(Q)$(MAKE) $(build)=scripts/gen_idt
 	$(Q)$(MAKE) $(build)=scripts/gen_offset_header
+else
+scripts_basic:
+endif
 
 # To avoid any implicit rule to kick in, define an empty command.
 scripts/basic/%: scripts_basic ;
@@ -575,13 +591,9 @@ else
 include/config/auto.conf: ;
 endif # $(dot-config)
 
-# Unified kernel objects are built as a static library
-ifeq ($(CONFIG_KERNEL_V2),y)
-libs-y := kernel/unified/
-core-y := lib/ misc/ net/ boards/ ext/ usb/ fs/ tests/ arch/
-else
-core-y := lib/ kernel/ misc/ net/ boards/ ext/ usb/ fs/ tests/ arch/
-endif
+# kernel objects are built as a static library
+libs-y := kernel/
+core-y := lib/ misc/ boards/ ext/ subsys/ tests/ arch/
 drivers-y := drivers/
 
 ARCH = $(subst $(DQUOTE),,$(CONFIG_ARCH))
@@ -731,7 +743,7 @@ KBUILD_LDS := $(subst $(DQUOTE),,$(CONFIG_CUSTOM_LINKER_SCRIPT))
 endif
 else
 # Try a board specific linker file
-KBUILD_LDS := $(srctree)/boards/$(BOARD_NAME)/linker.ld
+KBUILD_LDS := $(srctree)/boards/$(ARCH)/$(BOARD_NAME)/linker.ld
 
 # If not available, try an SoC specific linker file
 ifeq ($(wildcard $(KBUILD_LDS)),)
@@ -831,16 +843,12 @@ $(KERNEL_NAME).lnk: $(zephyr-deps)
 linker.cmd: $(zephyr-deps)
 	$(Q)$(CC) -x assembler-with-cpp -nostdinc -undef -E -P \
 	$(LDFLAG_LINKERCMD) $(LD_TOOLCHAIN) -I$(srctree)/include \
+	-I$(SOURCE_DIR) \
 	-I$(objtree)/include/generated $(EXTRA_LINKER_CMD_OPT) $(KBUILD_LDS) -o $@
 
-final-linker.cmd: $(zephyr-deps)
-	$(Q)$(CC) -x assembler-with-cpp -nostdinc -undef -E -P \
-	$(LDFLAG_LINKERCMD) $(LD_TOOLCHAIN) -DFINAL_LINK -I$(srctree)/include \
-	-I$(objtree)/include/generated $(EXTRA_LINKER_CMD_OPT) $(KBUILD_LDS) -o $@
+PREBUILT_KERNEL = $(KERNEL_NAME)_prebuilt.elf
 
-TMP_ELF = .tmp_$(KERNEL_NAME).prebuilt
-
-$(TMP_ELF): $(zephyr-deps) libzephyr.a $(KBUILD_ZEPHYR_APP) $(app-y) linker.cmd $(KERNEL_NAME).lnk
+$(PREBUILT_KERNEL): $(zephyr-deps) libzephyr.a $(KBUILD_ZEPHYR_APP) $(app-y) linker.cmd $(KERNEL_NAME).lnk
 	$(Q)$(CC) -T linker.cmd @$(KERNEL_NAME).lnk -o $@
 
 quiet_cmd_gen_idt = SIDT    $@
@@ -848,27 +856,24 @@ quiet_cmd_gen_idt = SIDT    $@
 (										\
 	$(OBJCOPY) -I $(OUTPUT_FORMAT)  -O binary -j intList $< isrList.bin &&	\
 	$(GENIDT) -i isrList.bin -n $(CONFIG_IDT_NUM_VECTORS) -o staticIdt.bin 	\
-		-b int_vector_alloc.bin -m irq_int_vector_map.bin		\
+		-m irq_int_vector_map.bin					\
 		-l $(CONFIG_MAX_IRQ_LINES) $(GENIDT_EXTRA_ARGS) &&		\
 	$(OBJCOPY) -I binary -B $(OUTPUT_ARCH) -O $(OUTPUT_FORMAT) 		\
 		--rename-section .data=staticIdt staticIdt.bin staticIdt.o &&	\
 	$(OBJCOPY) -I binary -B $(OUTPUT_ARCH) -O $(OUTPUT_FORMAT) 		\
-		--rename-section .data=int_vector_alloc int_vector_alloc.bin	\
-		int_vector_alloc.o &&						\
-	$(OBJCOPY) -I binary -B $(OUTPUT_ARCH) -O $(OUTPUT_FORMAT) 		\
 	--rename-section .data=irq_int_vector_map irq_int_vector_map.bin 	\
 		irq_int_vector_map.o &&						\
-	rm staticIdt.bin irq_int_vector_map.bin int_vector_alloc.bin isrList.bin\
+	rm staticIdt.bin irq_int_vector_map.bin isrList.bin			\
 )
 
-staticIdt.o: $(TMP_ELF)
+staticIdt.o: $(PREBUILT_KERNEL)
 	$(call cmd,gen_idt)
 
 quiet_cmd_lnk_elf = LINK    $@
       cmd_lnk_elf =									\
 (											\
-	$(CC) -T final-linker.cmd @$(KERNEL_NAME).lnk staticIdt.o int_vector_alloc.o 	\
-	irq_int_vector_map.o -o $@;							\
+	$(CC) -T linker.cmd @$(KERNEL_NAME).lnk staticIdt.o				\
+		irq_int_vector_map.o -o $@;						\
 	${OBJCOPY} --change-section-address intList=${CONFIG_PHYS_LOAD_ADDR} $@ elf.tmp;\
 	$(OBJCOPY) -R intList elf.tmp $@;						\
 	rm elf.tmp									\
@@ -882,15 +887,25 @@ ASSERT_WARNING_STR := \
 
 WARN_ABOUT_ASSERT := $(if $(CONFIG_ASSERT),echo -e -n $(ASSERT_WARNING_STR),true)
 
+
+DEPRECATION_WARNING_STR := \
+    "\n      WARNING:  The board '$(BOARD)' is deprecated and will be" \
+    "\n      removed in version $(CONFIG_BOARD_DEPRECATED)\n\n"
+
+WARN_ABOUT_DEPRECATION := $(if $(CONFIG_BOARD_DEPRECATED),echo -e \
+				-n $(DEPRECATION_WARNING_STR),true)
+
 ifeq ($(ARCH),x86)
-$(KERNEL_ELF_NAME): staticIdt.o final-linker.cmd
+$(KERNEL_ELF_NAME): staticIdt.o linker.cmd
 	$(call cmd,lnk_elf)
 	@$(srctree)/scripts/check_link_map.py $(KERNEL_NAME).map
 	@$(WARN_ABOUT_ASSERT)
+	@$(WARN_ABOUT_DEPRECATION)
 else
-$(KERNEL_ELF_NAME): $(TMP_ELF)
-	@cp $(TMP_ELF) $(KERNEL_ELF_NAME)
+$(KERNEL_ELF_NAME): $(PREBUILT_KERNEL)
+	@cp $(PREBUILT_KERNEL) $(KERNEL_ELF_NAME)
 	@$(WARN_ABOUT_ASSERT)
+	@$(WARN_ABOUT_DEPRECATION)
 endif
 
 
@@ -904,6 +919,15 @@ quiet_cmd_gen_bin = BIN     $@
 
 $(KERNEL_BIN_NAME): $(KERNEL_ELF_NAME)
 	$(call cmd,gen_bin)
+
+quiet_cmd_gen_hex = HEX     $@
+      cmd_gen_hex =                                                         \
+(                                                                           \
+   $(OBJCOPY) -S -O ihex -R .note -R .comment -R COMMON -R .eh_frame $< $@; \
+)
+
+$(KERNEL_HEX_NAME): $(KERNEL_ELF_NAME)
+	$(call cmd,gen_hex)
 
 $(KERNEL_STAT_NAME): $(KERNEL_BIN_NAME) $(KERNEL_ELF_NAME)
 	@$(READELF) -e $(KERNEL_ELF_NAME) > $@
@@ -1036,7 +1060,7 @@ CLEAN_FILES += 	misc/generated/sysgen/kernel_main.c \
 		misc/generated/sysgen/kernel_main.h \
 		.old_version .tmp_System.map .tmp_version \
 		.tmp_* System.map *.lnk *.map *.elf *.lst \
-		*.bin *.strip staticIdt.o linker.cmd final-linker.cmd
+		*.bin *.hex *.stat *.strip staticIdt.o linker.cmd
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_DIRS  += include/config usr/include include/generated          \
@@ -1087,7 +1111,7 @@ distclean: mrproper
 # Brief documentation of the typical targets used
 # ---------------------------------------------------------------------------
 
-boards := $(wildcard $(srctree)/boards/*/*_defconfig)
+boards := $(wildcard $(srctree)/boards/*/*/*_defconfig)
 boards := $(sort $(notdir $(boards)))
 
 kconfig-help:
@@ -1155,7 +1179,7 @@ help-board-dirs := $(addprefix help-,$(board-dirs))
 
 help-boards: $(help-board-dirs)
 
-boards-per-dir = $(sort $(notdir $(wildcard $(srctree)/boards/$*/*_defconfig)))
+boards-per-dir = $(sort $(notdir $(wildcard $(srctree)/boards/*/$*/*_defconfig)))
 
 $(help-board-dirs): help-%:
 	@echo  'Architecture specific targets ($(ARCH) $*):'
@@ -1235,7 +1259,7 @@ qemu: zephyr
 qemugdb: QEMU_EXTRA_FLAGS += -s -S
 qemugdb: qemu
 
--include $(srctree)/boards/$(BOARD_NAME)/Makefile.board
+-include $(srctree)/boards/$(ARCH)/$(BOARD_NAME)/Makefile.board
 ifneq ($(FLASH_SCRIPT),)
 flash: zephyr
 	@echo "Flashing $(BOARD_NAME)"

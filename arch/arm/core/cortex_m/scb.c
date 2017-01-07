@@ -24,7 +24,7 @@
  * definitions and more complex routines, if needed.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/util.h>
 
@@ -90,6 +90,7 @@ void sys_arch_reboot(int type)
 	DO_REBOOT();
 }
 
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 /**
  *
  * @brief Set the number of priority groups based on the number of exception
@@ -134,3 +135,4 @@ void _ScbNumPriGroupSet(unsigned int n)
 
 	__scs.scb.aircr.val = reg.val;
 }
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */

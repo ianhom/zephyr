@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <nanokernel.h>
+#include <kernel.h>
 #include <board.h>
 
 #include <device.h>
@@ -116,7 +116,7 @@ static int pinmux_input(struct device *dev, uint32_t pin, uint8_t func)
 	return 0;
 }
 
-static struct pinmux_driver_api api_funcs = {
+static const struct pinmux_driver_api api_funcs = {
 	.set = pinmux_set,
 	.get = pinmux_get,
 	.pullup = pinmux_pullup,
@@ -125,10 +125,12 @@ static struct pinmux_driver_api api_funcs = {
 
 static int pinmux_dev_init(struct device *port)
 {
+	ARG_UNUSED(port);
+
 	return 0;
 }
 
 DEVICE_AND_API_INIT(pmux_dev, CONFIG_PINMUX_DEV_NAME,
 		    &pinmux_dev_init, NULL, NULL,
-		    PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		    &api_funcs);

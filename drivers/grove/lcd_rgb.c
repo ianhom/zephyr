@@ -15,23 +15,17 @@
  */
 
 #include <errno.h>
-
-#include <nanokernel.h>
-#include <arch/cpu.h>
-
-#include <device.h>
-#include <sys_clock.h>
+#include <kernel.h>
+#include <init.h>
 #include <stdbool.h>
 
-#include <init.h>
 #include <i2c.h>
 #include <display/grove_lcd.h>
-
 #include <misc/util.h>
 
 #define SYS_LOG_DOMAIN "Grove LCD"
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_GROVE_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 #define SLEEP_IN_US(_x_)	((_x_) * 1000)
 
@@ -111,7 +105,7 @@ static void _rgb_reg_set(struct device * const i2c, uint8_t addr, uint8_t dta)
 
 static inline void _sleep(uint32_t sleep_in_ms)
 {
-	sys_thread_busy_wait(SLEEP_IN_US(sleep_in_ms));
+	k_busy_wait(SLEEP_IN_US(sleep_in_ms));
 }
 
 
@@ -348,12 +342,12 @@ int glcd_initialize(struct device *port)
 	return 0;
 }
 
-struct glcd_driver grove_lcd_config = {
+static const struct glcd_driver grove_lcd_config = {
 	.lcd_addr = GROVE_LCD_DISPLAY_ADDR,
 	.rgb_addr = GROVE_RGB_BACKLIGHT_ADDR,
 };
 
-struct glcd_data grove_lcd_driver = {
+static struct glcd_data grove_lcd_driver = {
 	.i2c = NULL,
 	.input_set = 0,
 	.display_switch = 0,
@@ -362,4 +356,4 @@ struct glcd_data grove_lcd_driver = {
 
 DEVICE_INIT(grove_lcd, GROVE_LCD_NAME, glcd_initialize,
 			&grove_lcd_driver, &grove_lcd_config,
-			NANOKERNEL, CONFIG_APPLICATION_INIT_PRIORITY);
+			POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY);

@@ -205,8 +205,8 @@ struct usb_dw_reg {
 #define USB_DW_PLL_TIMEOUT_US 100
 
 #if defined(CONFIG_SOC_QUARK_SE_C1000)
-#define USB_DW_BASE QM_USB_BASE
-#define USB_DW_IRQ QM_IRQ_USB_0
+#define USB_DW_BASE QM_USB_0_BASE
+#define USB_DW_IRQ QM_IRQ_USB_0_INT
 #else
 #error "Unsupported board"
 #endif

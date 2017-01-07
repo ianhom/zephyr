@@ -22,8 +22,8 @@
  * ARCv2 CPUs.
  */
 
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 #include <toolchain.h>
 #include <arch/cpu.h>
 
@@ -40,7 +40,7 @@ const NANO_ESF _default_esf = {
 
 /**
  *
- * @brief Nanokernel fatal error handler
+ * @brief Kernel fatal error handler
  *
  * This routine is called when fatal error conditions are detected by software
  * and is responsible only for reporting the error. Once reported, it then
@@ -77,7 +77,7 @@ FUNC_NORETURN void _NanoFatalErrorHandler(unsigned int reason,
 	}
 	PR_EXC("Current thread ID = %p\n"
 	       "Faulting instruction address = 0x%lx\n",
-	       sys_thread_self_get(),
+	       k_current_get(),
 	       _arc_v2_aux_reg_read(_ARC_V2_ERET));
 
 	/*

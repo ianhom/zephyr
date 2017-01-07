@@ -18,7 +18,7 @@
 #include <errno.h>
 
 #include <init.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <string.h>
 #include <stdlib.h>
 #include <board.h>
@@ -38,8 +38,8 @@ enum {
 
 struct adc_info  {
 	atomic_t  state;
-	device_sync_call_t sync;
-	struct nano_sem sem;
+	struct k_sem device_sync_sem;
+	struct k_sem sem;
 };
 
 static void adc_config_irq(void);
@@ -55,7 +55,7 @@ static void complete_callback(void *data, int error, qm_adc_status_t status,
 		if (error) {
 			adc_context->state = ADC_STATE_ERROR;
 		}
-		device_sync_call_complete(&adc_context->sync);
+		k_sem_give(&adc_context->device_sync_sem);
 	}
 }
 
@@ -63,13 +63,13 @@ static void complete_callback(void *data, int error, qm_adc_status_t status,
 
 static void adc_lock(struct adc_info *data)
 {
-	nano_sem_take(&data->sem, TICKS_UNLIMITED);
+	k_sem_take(&data->sem, K_FOREVER);
 	data->state = ADC_STATE_BUSY;
 
 }
 static void adc_unlock(struct adc_info *data)
 {
-	nano_sem_give(&data->sem);
+	k_sem_give(&data->sem);
 	data->state = ADC_STATE_IDLE;
 
 }
@@ -208,7 +208,7 @@ static int adc_qmsi_read(struct device *dev, struct adc_seq_table *seq_tbl)
 		}
 
 		/* Wait for the interrupt to finish */
-		device_sync_call_wait(&info->sync);
+		k_sem_take(&info->device_sync_sem, K_FOREVER);
 
 		if (info->state == ADC_STATE_ERROR) {
 			ret =  -EIO;
@@ -225,13 +225,13 @@ static int adc_qmsi_read(struct device *dev, struct adc_seq_table *seq_tbl)
 }
 #endif /* CONFIG_ADC_QMSI_POLL */
 
-static struct adc_driver_api api_funcs = {
+static const struct adc_driver_api api_funcs = {
 	.enable  = adc_qmsi_enable,
 	.disable = adc_qmsi_disable,
 	.read    = adc_qmsi_read,
 };
 
-int adc_qmsi_init(struct device *dev)
+static int adc_qmsi_init(struct device *dev)
 {
 	struct adc_info *info = dev->driver_data;
 
@@ -248,10 +248,10 @@ int adc_qmsi_init(struct device *dev)
 
 	qm_adc_set_config(QM_ADC_0, &cfg);
 
-	device_sync_call_init(&info->sync);
+	k_sem_init(&info->device_sync_sem, 0, UINT_MAX);
 
-	nano_sem_init(&info->sem);
-	nano_sem_give(&info->sem);
+	k_sem_init(&info->sem, 0, UINT_MAX);
+	k_sem_give(&info->sem);
 	info->state = ADC_STATE_IDLE;
 
 	adc_config_irq();
@@ -259,19 +259,19 @@ int adc_qmsi_init(struct device *dev)
 	return 0;
 }
 
-struct adc_info adc_info_dev;
+static struct adc_info adc_info_dev;
 
 DEVICE_AND_API_INIT(adc_qmsi, CONFIG_ADC_0_NAME, &adc_qmsi_init,
 		    &adc_info_dev, NULL,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		    (void *)&api_funcs);
 
 static void adc_config_irq(void)
 {
-	IRQ_CONNECT(QM_IRQ_ADC_0, CONFIG_ADC_0_IRQ_PRI, qm_adc_0_isr,
-		NULL, (IOAPIC_LEVEL | IOAPIC_HIGH));
+	IRQ_CONNECT(QM_IRQ_ADC_0_CAL_INT, CONFIG_ADC_0_IRQ_PRI,
+		qm_adc_0_cal_isr, NULL, (IOAPIC_LEVEL | IOAPIC_HIGH));
 
-	irq_enable(QM_IRQ_ADC_0);
+	irq_enable(QM_IRQ_ADC_0_CAL_INT);
 
-	QM_SCSS_INT->int_adc_calib_mask &= ~BIT(0);
+	QM_INTERRUPT_ROUTER->adc_0_cal_int_mask &= ~BIT(0);
 }

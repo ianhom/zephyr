@@ -18,7 +18,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 
 #include <misc/__assert.h>
@@ -39,7 +39,7 @@
 
 #define SYS_LOG_DOMAIN "SPI DW"
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_SPI_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 #if (CONFIG_SYS_LOG_SPI_LEVEL == 4)
 #define DBG_COUNTER_INIT()	\
@@ -106,7 +106,7 @@ out:
 	SYS_LOG_DBG("SPI transaction completed %s error",
 	    error ? "with" : "without");
 
-	device_sync_call_complete(&spi->sync);
+	k_sem_give(&spi->device_sync_sem);
 }
 
 static void push_data(struct device *dev)
@@ -361,7 +361,7 @@ static int spi_dw_transceive(struct device *dev,
 	/* Enable the controller */
 	set_bit_ssienr(info->regs);
 
-	device_sync_call_wait(&spi->sync);
+	k_sem_take(&spi->device_sync_sem, K_FOREVER);
 
 	if (spi->error) {
 		spi->error = 0;
@@ -401,7 +401,7 @@ out:
 	completed(dev, error);
 }
 
-static struct spi_driver_api dw_spi_api = {
+static const struct spi_driver_api dw_spi_api = {
 	.configure = spi_dw_configure,
 	.slave_select = spi_dw_slave_select,
 	.transceive = spi_dw_transceive,
@@ -427,7 +427,7 @@ int spi_dw_init(struct device *dev)
 
 	info->config_func();
 
-	device_sync_call_init(&spi->sync);
+	k_sem_init(&spi->device_sync_sem, 0, UINT_MAX);
 
 	_spi_config_cs(dev);
 
@@ -446,7 +446,7 @@ void spi_config_0_irq(void);
 
 struct spi_dw_data spi_dw_data_port_0;
 
-struct spi_dw_config spi_dw_config_0 = {
+const struct spi_dw_config spi_dw_config_0 = {
 	.regs = SPI_DW_PORT_0_REGS,
 #ifdef CONFIG_SPI_DW_CLOCK_GATE
 	.clock_data = UINT_TO_POINTER(CONFIG_SPI_0_CLOCK_GATE_SUBSYS),
@@ -460,7 +460,7 @@ struct spi_dw_config spi_dw_config_0 = {
 
 DEVICE_AND_API_INIT(spi_dw_port_0, CONFIG_SPI_0_NAME, spi_dw_init,
 		    &spi_dw_data_port_0, &spi_dw_config_0,
-		    SECONDARY, CONFIG_SPI_INIT_PRIORITY,
+		    POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,
 		    &dw_spi_api);
 
 void spi_config_0_irq(void)
@@ -493,7 +493,7 @@ void spi_config_1_irq(void);
 
 struct spi_dw_data spi_dw_data_port_1;
 
-struct spi_dw_config spi_dw_config_1 = {
+static const struct spi_dw_config spi_dw_config_1 = {
 	.regs = SPI_DW_PORT_1_REGS,
 #ifdef CONFIG_SPI_DW_CLOCK_GATE
 	.clock_data = UINT_TO_POINTER(CONFIG_SPI_1_CLOCK_GATE_SUBSYS),
@@ -507,7 +507,7 @@ struct spi_dw_config spi_dw_config_1 = {
 
 DEVICE_AND_API_INIT(spi_dw_port_1, CONFIG_SPI_1_NAME, spi_dw_init,
 		    &spi_dw_data_port_1, &spi_dw_config_1,
-		    SECONDARY, CONFIG_SPI_INIT_PRIORITY,
+		    POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,
 		    &dw_spi_api);
 
 void spi_config_1_irq(void)

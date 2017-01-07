@@ -1,4 +1,3 @@
-KERNEL_TYPE = nano
 BOARD = arduino_due
 CONF_FILE = prj.conf
 

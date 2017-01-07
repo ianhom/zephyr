@@ -28,12 +28,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <misc/byteorder.h>
-#include "usb_dc.h"
+#include <usb/usb_dc.h>
 #include "usb_dw_registers.h"
 #include "clk.h"
 
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_USB_DW_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 /* convert from endpoint address to hardware endpoint index */
 #define USB_DW_EP_ADDR2IDX(ep)  ((ep) & ~USB_EP_DIR_MASK)
@@ -71,7 +71,7 @@ static struct usb_dw_ctrl_prv usb_dw_ctrl;
 static inline void _usb_dw_int_unmask(void)
 {
 #if defined(CONFIG_SOC_QUARK_SE_C1000)
-	QM_SCSS_INT->int_usb_mask &= ~BIT(0);
+	QM_INTERRUPT_ROUTER->usb_0_int_mask &= ~BIT(0);
 #endif
 }
 
@@ -157,7 +157,7 @@ static uint8_t usb_dw_ep_is_enabled(uint8_t ep)
 
 static inline void usb_dw_udelay(uint32_t us)
 {
-	sys_thread_busy_wait(us);
+	k_busy_wait(us);
 }
 
 static int usb_dw_reset(void)
@@ -328,7 +328,7 @@ static int usb_dw_tx(uint8_t ep, const uint8_t *const data,
 	uint32_t max_xfer_size, max_pkt_cnt, pkt_cnt, avail_space;
 	uint32_t ep_mps = usb_dw_ctrl.in_ep_ctrl[ep_idx].mps;
 	unsigned int key;
-	int i;
+	uint32_t i;
 
 	/* Check if FIFO space available */
 	avail_space = USB_DW->in_ep_reg[ep_idx].dtxfsts &
@@ -944,8 +944,8 @@ int usb_dc_ep_write(const uint8_t ep, const uint8_t *const data,
 	return 0;
 }
 
-int usb_dc_ep_read(const uint8_t ep, uint8_t *const data,
-		const uint32_t max_data_len, uint32_t * const read_bytes)
+int usb_dc_ep_read_wait(uint8_t ep, uint8_t *data, uint32_t max_data_len,
+			uint32_t *read_bytes)
 {
 	uint8_t ep_idx = USB_DW_EP_ADDR2IDX(ep);
 	uint32_t i, j, data_len, bytes_to_copy;
@@ -1016,9 +1016,48 @@ int usb_dc_ep_read(const uint8_t ep, uint8_t *const data,
 		*read_bytes = bytes_to_copy;
 	}
 
-	/* Prepare ep for rx if all the data where read */
+	return 0;
+
+}
+
+int usb_dc_ep_read_continue(uint8_t ep)
+{
+	uint8_t ep_idx = USB_DW_EP_ADDR2IDX(ep);
+
+	if (!usb_dw_ctrl.attached && !usb_dw_ep_is_valid(ep)) {
+		SYS_LOG_ERR("No valid endpoint");
+		return -EINVAL;
+	}
+
+	/* Check if OUT ep */
+	if (USB_DW_EP_ADDR2DIR(ep) != USB_EP_DIR_OUT) {
+		SYS_LOG_ERR("Wrong endpoint direction");
+		return -EINVAL;
+	}
+
 	if (!usb_dw_ctrl.out_ep_ctrl[ep_idx].data_len) {
 		usb_dw_prep_rx(ep_idx, 0);
+	}
+
+	return 0;
+}
+
+int usb_dc_ep_read(const uint8_t ep, uint8_t *const data,
+		const uint32_t max_data_len, uint32_t * const read_bytes)
+{
+	if (usb_dc_ep_read_wait(ep, data, max_data_len, read_bytes) != 0) {
+		return -EINVAL;
+	}
+
+	if (!data && !max_data_len) {
+		/* When both buffer and max data to read are zero the above
+		 * call would fetch the data len and we simply return.
+		 */
+		return 0;
+	}
+
+	if (usb_dc_ep_read_continue(ep) != 0) {
+		return -EINVAL;
 	}
 
 	return 0;

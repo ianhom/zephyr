@@ -21,8 +21,8 @@
 #include <zephyr.h>
 
 #define SYS_LOG_DOMAIN "GROVE_TEMPERATURE_SENSOR"
-#define SYS_LOG_LEVEL CONFIG_GROVE_SYS_LOG_LEVEL
-#include <misc/sys_log.h>
+#define SYS_LOG_LEVEL CONFIG_SYS_LOG_GROVE_LEVEL
+#include <logging/sys_log.h>
 
 /* thermistor Nominal B-Constant */
 #if defined(CONFIG_GROVE_TEMPERATURE_SENSOR_V1_0)
@@ -51,6 +51,7 @@ static int gts_channel_get(struct device *dev,
 {
 	struct gts_data *drv_data = dev->driver_data;
 	uint16_t analog_val;
+	double dval;
 
 	/* rescale sample from 12bit (Zephyr) to 10bit (Grove) */
 	analog_val = ((uint16_t)drv_data->adc_buffer[1] << 8) |
@@ -62,14 +63,17 @@ static int gts_channel_get(struct device *dev,
 	 * is taken from the sensor reference page:
 	 *     http://www.seeedstudio.com/wiki/Grove_-_Temperature_Sensor
 	 */
-	val->type = SENSOR_VALUE_TYPE_DOUBLE;
-	val->dval = 1 / (log(1023.0 / analog_val - 1.0) / B_CONST +
-			 1 / 298.15) - 273.15;
+	dval = 1 / (log(1023.0 / analog_val - 1.0) / B_CONST +
+		    1 / 298.15) - 273.15;
+
+	val->type = SENSOR_VALUE_TYPE_INT_PLUS_MICRO;
+	val->val1 = (int32_t)dval;
+	val->val2 = ((int32_t)(dval * 1000000)) % 1000000;
 
 	return 0;
 }
 
-static struct sensor_driver_api gts_api = {
+static const struct sensor_driver_api gts_api = {
 	.sample_fetch = &gts_sample_fetch,
 	.channel_get = &gts_channel_get,
 };
@@ -101,7 +105,7 @@ static int gts_init(struct device *dev)
 	return 0;
 }
 
-struct gts_data gts_data;
+static struct gts_data gts_data;
 
 DEVICE_INIT(gts_dev, CONFIG_GROVE_TEMPERATURE_SENSOR_NAME, &gts_init, &gts_data,
-	    NULL, SECONDARY, CONFIG_SENSOR_INIT_PRIORITY);
+	    NULL, POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY);

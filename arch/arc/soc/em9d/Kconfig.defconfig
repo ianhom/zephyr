@@ -27,11 +27,6 @@ config NUM_IRQ_PRIO_LEVELS
 	# so this must be 2 for now.
 	default 2
 
-config NUM_REGULAR_IRQ_PRIO_LEVELS
-	# This processor supports 3 Regular Interrupt priority level (1-3).
-	# TODO: But regular irq nesting is not implemented -- so use 1.
-	default 1
-
 config NUM_IRQS
 	# must be > the highest interrupt number used
 	default 36
@@ -53,11 +48,9 @@ config FLASH_SIZE
 	# em9d has no FLASH so size is 0.
 
 config SRAM_BASE_ADDRESS
-	default 0x00000000 if NSIM
 	default 0x00000000
 
 config SRAM_SIZE
-	default 0 if NSIM
 	default 0
 	# em9d has no SRAM so size is 0.
 

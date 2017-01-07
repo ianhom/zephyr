@@ -17,7 +17,7 @@
 #include <errno.h>
 
 #include <stdio.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <board.h>
 #include <device.h>
 #include <init.h>
@@ -27,6 +27,11 @@
 
 #define INT_COMPARATORS_MASK 0x7FFFF
 #define AIO_QMSI_CMP_COUNT		(19)
+#if (QM_LAKEMONT)
+#define CMP_INTR_ROUTER QM_INTERRUPT_ROUTER->comparator_0_host_int_mask
+#else
+#define CMP_INTR_ROUTER QM_INTERRUPT_ROUTER->comparator_0_ss_int_mask
+#endif
 
 struct aio_qmsi_cmp_cb {
 	aio_cmp_cb cb;
@@ -51,12 +56,14 @@ static int aio_qmsi_cmp_disable(struct device *dev, uint8_t index)
 		return -EINVAL;
 	}
 
-	/* Disable interrupt to host */
-	QM_SCSS_INT->int_comparators_host_mask |= (1 << index);
+	/* Disable interrupt to current core */
+	CMP_INTR_ROUTER |= (1 << index);
 
 	/* Disable comparator according to index */
 	config.int_en &= ~(1 << index);
 	config.power &= ~(1 << index);
+	config.reference &= ~(1 << index);
+	config.polarity &= ~(1 << index);
 
 	if (qm_ac_set_config(&config) != 0) {
 		return -EINVAL;
@@ -103,18 +110,24 @@ static int aio_qmsi_cmp_configure(struct device *dev, uint8_t index,
 		return -EINVAL;
 	}
 
-	/* Enable Interrupts to host for an specific comparator */
-	QM_SCSS_INT->int_comparators_host_mask &= ~(1 << index);
+	/* Enable Interrupts to current core for an specific comparator */
+	CMP_INTR_ROUTER &= ~(1 << index);
 
 	return 0;
 }
 
-static struct aio_cmp_driver_api aio_cmp_funcs = {
+static uint32_t aio_cmp_qmsi_get_pending_int(struct device *dev)
+{
+	return QM_SCSS_CMP->cmp_stat_clr;
+}
+
+static const struct aio_cmp_driver_api aio_cmp_funcs = {
 	.disable = aio_qmsi_cmp_disable,
 	.configure = aio_qmsi_cmp_configure,
+	.get_pending_int = aio_cmp_qmsi_get_pending_int,
 };
 
-int aio_qmsi_cmp_init(struct device *dev)
+static int aio_qmsi_cmp_init(struct device *dev)
 {
 	uint8_t i;
 	struct aio_qmsi_cmp_dev_data_t *dev_data =
@@ -123,7 +136,7 @@ int aio_qmsi_cmp_init(struct device *dev)
 	aio_cmp_config(dev);
 
 	/* Disable all comparator interrupts */
-	QM_SCSS_INT->int_comparators_host_mask |= INT_COMPARATORS_MASK;
+	CMP_INTR_ROUTER |= INT_COMPARATORS_MASK;
 
 	/* Clear status and dissble all comparators */
 	QM_SCSS_CMP->cmp_stat_clr |= INT_COMPARATORS_MASK;
@@ -144,14 +157,15 @@ int aio_qmsi_cmp_init(struct device *dev)
 		dev_data->cb[i].param = NULL;
 	}
 
-	irq_enable(QM_IRQ_AC);
+	irq_enable(IRQ_GET_NUMBER(QM_IRQ_COMPARATOR_0_INT));
 
 	return 0;
 }
 
-void aio_qmsi_cmp_isr(struct device *dev)
+static void aio_qmsi_cmp_isr(void *data)
 {
 	uint8_t i;
+	struct device *dev = data;
 	struct aio_qmsi_cmp_dev_data_t *dev_data =
 		(struct aio_qmsi_cmp_dev_data_t *)dev->driver_data;
 
@@ -170,21 +184,22 @@ void aio_qmsi_cmp_isr(struct device *dev)
 	QM_SCSS_CMP->cmp_stat_clr = int_status;
 }
 
-struct aio_qmsi_cmp_dev_data_t aio_qmsi_cmp_dev_data = {
+static struct aio_qmsi_cmp_dev_data_t aio_qmsi_cmp_dev_data = {
 		.num_cmp = AIO_QMSI_CMP_COUNT,
 };
 
 DEVICE_AND_API_INIT(aio_qmsi_cmp, CONFIG_AIO_COMPARATOR_0_NAME,
 		    &aio_qmsi_cmp_init, &aio_qmsi_cmp_dev_data, NULL,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    (void *)&aio_cmp_funcs);
 
 static int aio_cmp_config(struct device *dev)
 {
 	ARG_UNUSED(dev);
 
-	IRQ_CONNECT(QM_IRQ_AC, CONFIG_AIO_COMPARATOR_0_IRQ_PRI,
-		    aio_qmsi_cmp_isr, DEVICE_GET(aio_qmsi_cmp), 0);
+	IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_COMPARATOR_0_INT),
+		    CONFIG_AIO_COMPARATOR_0_IRQ_PRI, aio_qmsi_cmp_isr,
+		    DEVICE_GET(aio_qmsi_cmp), 0);
 
 	return 0;
 }

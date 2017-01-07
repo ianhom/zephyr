@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #define MAX_LINE_LEN 256
 struct uart_console_input {
@@ -38,14 +38,14 @@ struct uart_console_input {
  *  terminated. Application before calling register function need to
  *  initialize two fifo queues mentioned below.
  *
- *  @param avail nano_fifo queue keeping available input slots
- *  @param lines nano_fifo queue of entered lines which to be processed
+ *  @param avail k_fifo queue keeping available input slots
+ *  @param lines k_fifo queue of entered lines which to be processed
  *         in the application code.
  *  @param completion callback for tab completion of entered commands
  *
  *  @return N/A
  */
-void uart_register_input(struct nano_fifo *avail, struct nano_fifo *lines,
+void uart_register_input(struct k_fifo *avail, struct k_fifo *lines,
 			 uint8_t (*completion)(char *str, uint8_t len));
 
 /*
@@ -57,8 +57,13 @@ void uart_register_input(struct nano_fifo *avail, struct nano_fifo *lines,
 #define UART_CONSOLE_OUT_DEBUG_HOOK_SIG(x) int(x)(char c)
 typedef UART_CONSOLE_OUT_DEBUG_HOOK_SIG(uart_console_out_debug_hook_t);
 
-extern void uart_console_out_debug_hook_install(
+void uart_console_out_debug_hook_install(
 				uart_console_out_debug_hook_t *hook);
+
+typedef int (*uart_console_in_debug_hook_t) (uint8_t);
+
+void uart_console_in_debug_hook_install(uart_console_in_debug_hook_t hook);
+
 #endif
 
 #ifdef __cplusplus

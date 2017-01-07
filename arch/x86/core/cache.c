@@ -20,7 +20,7 @@
  * This module contains functions for manipulation caches.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/util.h>
 #include <toolchain.h>
@@ -108,6 +108,6 @@ static int init_cache(struct device *unused)
 	return 0;
 }
 
-SYS_INIT(init_cache, PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(init_cache, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 #endif /* CONFIG_CLFLUSH_DETECT || CONFIG_CACHE_LINE_SIZE_DETECT */

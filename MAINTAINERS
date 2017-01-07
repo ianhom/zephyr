@@ -61,64 +61,118 @@ Maintainers List (try to look for most precise areas first)
 
 ARC ARCHITECTURE
 M:	Ruud Derwig <Ruud.Derwig@synopsys.com>
-M:	Chuck Jordan <Chuck.Jordan@synopsys.com>
+M:	Chuck Jordan <cjordan@synopsys.com>
 M:	Benjamin Walsh <benjamin.walsh@windriver.com>
 S:	Supported
 F:	arch/arc/
 F:	include/arch/arc/
+F:	boards/arc/
 
 ARM ARCHITECTURE
 M:	Maureen Helm <maureen.helm@nxp.com>
+M:	Kumar Gala <kumar.gala@linaro.org>
 S:	Supported
 F:	arch/arm/
 F:	include/arch/arm/
+F:	boards/arm/
 
 ARM CORTEX MICROCONTROLLER SOFTWARE INTERFACE STANDARD (CMSIS)
 M:	Maureen Helm <maureen.helm@nxp.com>
+M:	Kumar Gala <kumar.gala@linaro.org>
 S:	Supported
 F:	ext/hal/cmsis/
 
-BOARDS - ALTERA MAX10
-M:	Andrew Boie <andrew.p.boie@intel.com>
-S:	Supported
-F:	boards/altera_max10/
-
-BOARDS - ARDUINO 101
+BOARDS/ARC - ARDUINO 101 SSS
 M:      Anas Nashif <anas.nashif@intel.com>
 S:	Supported
-F:	boards/arduino_101/
-F:	boards/arduino_101_sss/
+F:	boards/arc/arduino_101_sss/
 
-BOARDS - EM Starterkit
-M:	Chuck Jordan <Chuck.Jordan@synopsys.com>
+BOARDS/ARC - EM Starterkit
+M:	Chuck Jordan <cjordan@synopsys.com>
 S:	Supported
-F:	boards/em_starterkit/
+F:	boards/arc/em_starterkit/
 
-BOARDS - Galileo
+BOARDS/ARC - QUARK SE C1000 SS Devboard
 M:      Anas Nashif <anas.nashif@intel.com>
 S:	Supported
-F:	boards/galileo/
+F:	boards/arc/quark_se_c1000_ss_devboard/
 
-BOARDS - NORDIC NRF52 PCA10040
-M:	Carles Cufi <carles.cufi@nordicsemi.no>
+BOARDS/ARM - 96Boards CARBON
+M:	Amit Kucheria <amit.kucheria@linaro.org>
+M:	Ricardo Salveti <ricardo.salveti@linaro.org>
 S:	Supported
-F:	boards/nrf52_pca10040/
+F:	boards/arm/96b_carbon/
 
-BOARDS - 96Boards NITROGEN
+BOARDS/ARM - 96Boards NITROGEN
 M:	Amit Kucheria <amit.kucheria@linaro.org>
 S:	Supported
-F:	boards/96b_nitrogen/
+F:	boards/arm/96b_nitrogen/
 
-BOARDS - QUARK SE C1000 Devboard
+BOARDS/ARM - ARDUINO 101 BLE
+M:	Johan Hedberg <johan.hedberg@intel.com>
+S:	Supported
+F:	boards/arm/arduino_101_ble/
+
+BOARDS/ARM - CC3200 LAUNCHXL
+M:      Gil Pitney <gil.pitney@linaro.org>
+S:      Supported
+F:      boards/arm/cc3200_launchxl/
+
+BOARDS/ARM - NXP FRDM-K64F
+M:	Maureen Helm <maureen.helm@nxp.com>
+S:	Supported
+F:	boards/arm/frdm_k64f/
+
+BOARDS/ARM - NXP Hexiwear
+M:	Maureen Helm <maureen.helm@nxp.com>
+S:	Supported
+F:	boards/arm/hexiwear_k64/
+
+BOARDS/ARM - NORDIC NRF51 REDBEAR BLENANO
+M:	Ricardo Salveti <ricardo.salveti@linaro.org>
+S:	Supported
+F:	boards/arm/nrf51_blenano/
+
+BOARDS/ARM - NORDIC NRF52 PCA10040
+M:	Carles Cufi <carles.cufi@nordicsemi.no>
+S:	Supported
+F:	boards/arm/nrf52_pca10040/
+
+BOARDS/ARM - NUCLEO-64 F401RE Devboard
+M:	Amit Kucheria <amit.kucheria@linaro.org>
+M:	Ricardo Salveti <ricardo.salveti@linaro.org>
+S:	Supported
+F:	boards/arm/nucleo_f401re/
+
+BOARDS/ARM - ARM LTD V2M Beetle
+M:	Vincenzo Frascino <vincenzo.frascino@linaro.org>
+S:	Supported
+F:	boards/arm/v2m_beetle/
+
+BOARDS/NIOS2 - ALTERA MAX10
+M:	Andrew Boie <andrew.p.boie@intel.com>
+S:	Supported
+F:	boards/nios2/altera_max10/
+
+BOARDS/X86 - ARDUINO 101
 M:      Anas Nashif <anas.nashif@intel.com>
 S:	Supported
-F:	boards/quark_se_c1000/
-F:	boards/quark_se_c1000_ss/
+F:	boards/x86/arduino_101/
 
-BOARDS - QUARK D2000 Devboard
+BOARDS/X86 - Galileo
 M:      Anas Nashif <anas.nashif@intel.com>
 S:	Supported
-F:	boards/quark_d2000/
+F:	boards/x86/galileo/
+
+BOARDS/X86 - QUARK D2000 Devboard
+M:      Anas Nashif <anas.nashif@intel.com>
+S:	Supported
+F:	boards/x86/quark_d2000/
+
+BOARDS/X86 - QUARK SE C1000 Devboard
+M:      Anas Nashif <anas.nashif@intel.com>
+S:	Supported
+F:	boards/x86/quark_se_c1000/
 
 BLUETOOTH
 M:	Johan Hedberg <johan.hedberg@intel.com>
@@ -126,17 +180,28 @@ M:	Luiz Augusto von Dentz <luiz.dentz@gmail.com>
 M:	Szymon Janc <szymon.janc@gmail.com>
 S:	Supported
 W:	https://www.zephyrproject.org/doc/subsystems/bluetooth/bluetooth.html
-F:	net/bluetooth/
+F:	subsys/bluetooth/
 F:	include/bluetooth/
 F:	drivers/bluetooth/
 F:	samples/bluetooth/
 F:	tests/bluetooth/
+F:	doc/subsystems/bluetooth/
 
 BLUETOOTH CONTROLLER
 M:	Vinayak Chettimada <vinayak.kariappa.chettimada@nordicsemi.no>
 M:	Carles Cufi <carles.cufi@nordicsemi.no>
 S:	Supported
-F:	drivers/bluetooth/controller/
+F:	subsys/bluetooth/controller/
+
+CC3200 SDK
+M:      Gil Pitney <gil.pitney@linaro.org>
+S:      Supported
+F:      ext/hal/cc3200sdk/
+
+CC32XX SOC - TI SIMPLELINK
+M:      Gil Pitney <gil.pitney@linaro.org>
+S:      Supported
+F:      arch/arm/soc/ti_simplelink/
 
 DOCUMENTATION
 M:	Kinder, David <david.b.kinder@intel.com>
@@ -149,7 +214,7 @@ M:	Ramesh Thomas <ramesh.thomas@intel.com>
 M:	Kuo-Lang Tseng <kuo-lang.tseng@intel.com>
 S:	Supported
 F:	ext/fs/
-F:	fs/
+F:	subsys/fs/
 F:	include/fs/
 F:	include/fs.h
 F:	samples/fs/
@@ -181,11 +246,12 @@ F:	include/drivers/mvic.h
 KERNEL CORE
 M:	Benjamin Walsh <benjamin.walsh@windriver.com>
 M:	Allan Stephens <allan.stephens@windriver.com>
+M:	Andrew Boie <andrew.p.boie@intel.com>
+M:	Andy Ross <andrew.j.ross@intel.com>
 S:	Supported
 F:	kernel/
 F:	include/nanokernel.h
 F:	include/microkernel.h
-F:	include/microkernel/
 F:	include/misc/
 F:	include/toolchain/
 F:	include/atomic.h
@@ -205,6 +271,9 @@ F:	include/sys_clock.h
 F:	include/sys_io.h
 F:	include/toolchain.h
 F:	include/zephyr.h
+F:	include/kernel.h
+F:	include/legacy.h
+F:	tests/kernel/
 
 KINETIS SOFTWARE DEVELOPMENT KIT (KSDK)
 M:	Maureen Helm <maureen.helm@nxp.com>
@@ -214,12 +283,12 @@ F:	ext/hal/ksdk/
 KNOWN ISSUES
 M:	Anas Nashif <anas.nashif@intel.com>
 M:	Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
-M:	Javier B Perez <javier.b.perez.hernandez@intel.com>
+M:	Genaro Saucedo <genaro.saucedo.tejada@intel.com>
 F:	.known-issues/
 
 
 MAINTAINERS
-M:	Javier B Perez <javier.b.perez.hernandez@intel.com>
+M:	Genaro Saucedo <genaro.saucedo.tejada@intel.com>
 M:	Anas Nashif <anas.nashif@intel.com>
 M:	Perez-Gonzalez, Inaky <inaky.perez-gonzalez@intel.com>
 S:	Supported
@@ -236,26 +305,36 @@ F:	tests/crypto/test_mbedtls/
 
 NETWORKING
 M:	Jukka Rissanen <jukka.rissanen@linux.intel.com>
+M:	Tomasz Bursztyka <tomasz.bursztyka@linux.intel.com>
 S:	Supported
 W:	https://www.zephyrproject.org/doc/subsystems/networking/networking.html
-F:	net/ip/
+F:	subsys/net/ip/
+F:	subsys/net/lib/
 F:	include/net/
 F:	samples/net/
 F:	tests/net/
+F:	tests/net/lib/
+F:	drivers/ethernet/
+F:	drivers/ieee802154/
+F:	drivers/slip/
 
 NETWORK APPLICATIONS
 M:	Flavio Santes <flavio.santes@intel.com>
 S:	Supported
+F:	subsys/net/lib/dns/
+F:	subsys/net/lib/http/
+F:	subsys/net/lib/mqtt/
 F:	samples/net/dns_client/
-F:	samples/net/nats_clients/
-F:	samples/net/paho_mqtt_clients/
+F:	tests/net/lib/http_header_fields/
+F:	tests/net/lib/mqtt_packet/
 
 NETWORK BUFFERS
 M:	Johan Hedberg <johan.hedberg@intel.com>
 M:	Jukka Rissanen <jukka.rissanen@linux.intel.com>
+M:	Tomasz Bursztyka <tomasz.bursztyka@linux.intel.com>
 S:	Supported
 W:	https://www.zephyrproject.org/doc/subsystems/networking/buffers.html
-F:	net/buf.c
+F:	subsys/net/buf.c
 F:	include/net/buf.h
 F:	tests/net/buf/
 
@@ -267,6 +346,7 @@ F:	include/arch/nios2/
 F:	drivers/serial/uart_altera_jtag.c
 F:	drivers/timer/altera_avalon_timer.c
 F:	tests/kernel/test_intmath/
+F:	boards/nios2/
 
 NORDIC MDK
 M:	Carles Cufi <carles.cufi@nordicsemi.no>
@@ -281,8 +361,8 @@ F:	arch/x86/core/crt0.S
 F:	include/device.h
 F:	include/init.h
 F:	include/power.h
-F:	kernel/microkernel/k_idle.c
-F:	kernel/nanokernel/device.c
+F:	kernel/k_idle.c
+F:	kernel/device.c
 F:	samples/power/
 
 QMSI
@@ -321,7 +401,7 @@ F:	scripts/expr_parser.py
 F:	scripts/sanity_chk/
 
 SENSOR DRIVERS
-M:	Bogdan Davidoaia <bogdan.m.davidoaia@intel.com>
+M:	Bogdan Davidoaia <bogdan.davidoaia@gmail.com>
 M:	Laurentiu Palcu <laurentiu.palcu@intel.com>
 M:	Murtaza Alexandru <alexandru.murtaza@intel.com>
 M:	Vlad Dogaru <vlad.dogaru@intel.com>
@@ -331,6 +411,20 @@ F:	include/sensor.h
 F:	drivers/sensor/
 F:	samples/sensor/
 
+STM32CUBE SDK
+M:	Erwan Gouriou <erwan.gouriou@linaro.org>
+S:	Supported
+F:	ext/hal/st/stm32cube/
+
+STM32F4X SoC FAMILY and DRIVERS
+M:	Amit Kucheria <amit.kucheria@linaro.org>
+M:	Ricardo Salveti <ricardo.salveti@linaro.org>
+S:	Supported
+F:	arch/arm/soc/st_stm32/stm32f4/
+F:	drivers/pinmux/stm32/
+F:	drivers/gpio/*stm32*
+F:	drivers/clock_control/*stm32f4*
+
 TINYCRYPT
 M:	Constanza Heath <constanza.m.heath@intel.com>
 M:	Flavio Santes <flavio.santes@intel.com>
@@ -338,23 +432,39 @@ S:	Supported
 F:	ext/lib/crypto/tinycrypt/
 F:	tests/crypto/
 
+SPI
+M:	Tomasz Bursztyka <tomasz.bursztyka@linux.intel.com>
+S:	Supported
+F:	drivers/spi/
+F:	include/spi.h
+F:	tests/drivers/spi_test/
+
+USB
+M:	Jithu Joseph <jithu.joseph@intel.com>
+S:	Supported
+F:	subsys/usb
+F:	drivers/usb
+F:	samples/usb
+
 X86 ARCH
 M:	Benjamin Walsh <benjamin.walsh@windriver.com>
 M:	Allan Stephens <allan.stephens@windriver.com>
 S:	Supported
 F:	arch/x86/
 F:	include/arch/x86/
+F:	boards/x86/
 
 ZOAP
 M:	Vinicius Costa Gomes <vinicius.gomes@intel.com>
 S:	Supported
-F:	lib/iot/zoap/
+F:	subsys/net/lib/zoap/
 F:	samples/net/zoap_client/
 F:	samples/net/zoap_server/
-F:	tests/net/zoap/
+F:	tests/net/lib/zoap/
 
 THE REST
 M:	Anas Nashif <anas.nashif@intel.com>
+M:	Kumar Gala <kumar.gala@linaro.org>
 L:	devel@lists.zephyrproject.com
 T:	git https://gerrit.zephyrproject.org/r/a/zephyr
 S:	Buried alive in reporters

@@ -18,7 +18,7 @@
 #include <errno.h>
 
 #include <init.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <string.h>
 #include <stdlib.h>
 #include <board.h>
@@ -38,8 +38,14 @@ enum {
 
 struct adc_info  {
 	atomic_t  state;
-	device_sync_call_t sync;
-	struct nano_sem sem;
+	struct k_sem device_sync_sem;
+	struct k_sem sem;
+#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+	uint32_t device_power_state;
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+	qm_ss_adc_context_t adc_ctx;
+#endif
+#endif
 };
 
 static void adc_config_irq(void);
@@ -61,7 +67,7 @@ static void complete_callback(void *data, int error, qm_ss_adc_status_t status,
 		if (error) {
 			info->state = ADC_STATE_ERROR;
 		}
-		device_sync_call_complete(&info->sync);
+		k_sem_give(&info->device_sync_sem);
 	}
 }
 
@@ -69,13 +75,13 @@ static void complete_callback(void *data, int error, qm_ss_adc_status_t status,
 
 static void adc_lock(struct adc_info *data)
 {
-	nano_sem_take(&data->sem, TICKS_UNLIMITED);
+	k_sem_take(&data->sem, K_FOREVER);
 	data->state = ADC_STATE_BUSY;
 
 }
 static void adc_unlock(struct adc_info *data)
 {
-	nano_sem_give(&data->sem);
+	k_sem_give(&data->sem);
 	data->state = ADC_STATE_IDLE;
 
 }
@@ -210,7 +216,7 @@ static int adc_qmsi_ss_read(struct device *dev, struct adc_seq_table *seq_tbl)
 		}
 
 		/* Wait for the interrupt to finish */
-		device_sync_call_wait(&info->sync);
+		k_sem_take(&info->device_sync_sem, K_FOREVER);
 
 		if (info->state == ADC_STATE_ERROR) {
 			ret =  -EIO;
@@ -225,30 +231,87 @@ static int adc_qmsi_ss_read(struct device *dev, struct adc_seq_table *seq_tbl)
 }
 #endif /* CONFIG_ADC_QMSI_POLL */
 
-void adc_qmsi_ss_rx_isr(void *arg)
+static void adc_qmsi_ss_rx_isr(void *arg)
 {
 	ARG_UNUSED(arg);
 	qm_ss_adc_0_isr(NULL);
 }
 
-void adc_qmsi_ss_err_isr(void *arg)
+static void adc_qmsi_ss_err_isr(void *arg)
 {
 	ARG_UNUSED(arg);
-	qm_ss_adc_0_err_isr(NULL);
+	qm_ss_adc_0_error_isr(NULL);
 }
 
-static struct adc_driver_api api_funcs = {
+static const struct adc_driver_api api_funcs = {
 	.enable  = adc_qmsi_ss_enable,
 	.disable = adc_qmsi_ss_disable,
 	.read    = adc_qmsi_ss_read,
 };
 
-int adc_qmsi_ss_init(struct device *dev)
+#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+static void adc_qmsi_ss_set_power_state(struct device *dev,
+					uint32_t power_state)
+{
+	struct adc_info *context = dev->driver_data;
+
+	context->device_power_state = power_state;
+}
+
+static uint32_t adc_qmsi_ss_get_power_state(struct device *dev)
+{
+	struct adc_info *context = dev->driver_data;
+
+	return context->device_power_state;
+}
+
+#if CONFIG_SYS_POWER_DEEP_SLEEP
+static int adc_qmsi_ss_suspend_device(struct device *dev)
+{
+	struct adc_info *context = dev->driver_data;
+
+	qm_ss_adc_save_context(QM_SS_ADC_0, &context->adc_ctx);
+
+	adc_qmsi_ss_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
+
+	return 0;
+}
+
+static int adc_qmsi_ss_resume_device_from_suspend(struct device *dev)
+{
+	struct adc_info *context = dev->driver_data;
+
+	qm_ss_adc_restore_context(QM_SS_ADC_0, &context->adc_ctx);
+
+	adc_qmsi_ss_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
+	return 0;
+}
+#endif /* CONFIG_SYS_POWER_DEEP_SLEEP */
+
+static int adc_qmsi_ss_device_ctrl(struct device *dev, uint32_t ctrl_command,
+				   void *context)
+{
+	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
+			return adc_qmsi_ss_suspend_device(dev);
+		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
+			return adc_qmsi_ss_resume_device_from_suspend(dev);
+		}
+#endif
+	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
+		*((uint32_t *)context) = adc_qmsi_ss_get_power_state(dev);
+	}
+
+	return 0;
+}
+#else
+#define adc_qmsi_ss_set_power_state(...)
+#endif /* CONFIG_DEVICE_POWER_MANAGEMENT */
+static int adc_qmsi_ss_init(struct device *dev)
 {
 	struct adc_info *info = dev->driver_data;
-
-	dev->driver_api = &api_funcs;
-
 
 	/* Set up config */
 	/* Clock cycles between the start of each sample */
@@ -259,22 +322,24 @@ int adc_qmsi_ss_init(struct device *dev)
 
 	ss_clk_adc_enable();
 	ss_clk_adc_set_div(CONFIG_ADC_QMSI_CLOCK_RATIO);
-	device_sync_call_init(&info->sync);
+	k_sem_init(&info->device_sync_sem, 0, UINT_MAX);
 
-	nano_sem_init(&info->sem);
-	nano_sem_give(&info->sem);
+	k_sem_init(&info->sem, 0, UINT_MAX);
+	k_sem_give(&info->sem);
 	info->state = ADC_STATE_IDLE;
 
 	adc_config_irq();
 
+	adc_qmsi_ss_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
 	return 0;
 }
 
-struct adc_info adc_info_dev;
+static struct adc_info adc_info_dev;
 
-DEVICE_INIT(adc_qmsi_ss, CONFIG_ADC_0_NAME, &adc_qmsi_ss_init,
-		    &adc_info_dev, NULL,
-			SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+DEVICE_DEFINE(adc_qmsi_ss, CONFIG_ADC_0_NAME, &adc_qmsi_ss_init,
+	      adc_qmsi_ss_device_ctrl, &adc_info_dev, NULL, POST_KERNEL,
+	      CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api_funcs);
 
 static void adc_config_irq(void)
 {
@@ -288,9 +353,10 @@ static void adc_config_irq(void)
 		    adc_qmsi_ss_err_isr, DEVICE_GET(adc_qmsi_ss), 0);
 	irq_enable(IRQ_ADC_ERR);
 
-	scss_intmask = (uint32_t *)&QM_SCSS_INT->int_ss_adc_err_mask;
+	scss_intmask =
+		(uint32_t *)&QM_INTERRUPT_ROUTER->ss_adc_0_error_int_mask;
 	*scss_intmask &= ~BIT(8);
 
-	scss_intmask = (uint32_t *)&QM_SCSS_INT->int_ss_adc_irq_mask;
+	scss_intmask = (uint32_t *)&QM_INTERRUPT_ROUTER->ss_adc_0_int_mask;
 	*scss_intmask &= ~BIT(8);
 }

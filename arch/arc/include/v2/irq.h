@@ -18,7 +18,7 @@
  * @file
  * @brief Interrupt helper functions (ARC)
  *
- * This file contains private nanokernel structures definitions and various
+ * This file contains private kernel structures definitions and various
  * other definitions for the ARCv2 processor architecture.
  */
 
@@ -57,10 +57,10 @@ static ALWAYS_INLINE void _irq_setup(void)
 		_ARC_V2_AUX_IRQ_CTRL_14_REGS     /* save r0 -> r13 (caller-saved) */
 	);
 
-	nano_cpu_sleep_mode = _ARC_V2_WAKE_IRQ_LEVEL;
+	k_cpu_sleep_mode = _ARC_V2_WAKE_IRQ_LEVEL;
 	_arc_v2_aux_reg_write(_ARC_V2_AUX_IRQ_CTRL, aux_irq_ctrl_value);
 
-	_nanokernel.rirq_sp = _interrupt_stack + CONFIG_ISR_STACK_SIZE;
+	_kernel.irq_stack = _interrupt_stack + CONFIG_ISR_STACK_SIZE;
 	_firq_stack_setup();
 }
 

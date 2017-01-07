@@ -34,21 +34,27 @@ static struct ss_pending_transfer pending_transfers[2];
 
 struct ss_spi_qmsi_config {
 	qm_ss_spi_t spi;
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 	char *cs_port;
 	uint32_t cs_pin;
 #endif
 };
 
 struct ss_spi_qmsi_runtime {
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 	struct device *gpio_cs;
 #endif
-	device_sync_call_t sync;
-	struct nano_sem sem;
+	struct k_sem device_sync_sem;
+	struct k_sem sem;
 	qm_ss_spi_config_t cfg;
 	int rc;
 	bool loopback;
+#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+	uint32_t device_power_state;
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+	qm_ss_spi_context_t spi_ctx;
+#endif
+#endif
 };
 
 static inline qm_ss_spi_bmode_t config_to_bmode(uint8_t mode)
@@ -65,7 +71,7 @@ static inline qm_ss_spi_bmode_t config_to_bmode(uint8_t mode)
 	}
 }
 
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 static void spi_control_cs(struct device *dev, bool active)
 {
 	struct ss_spi_qmsi_runtime *context = dev->driver_data;
@@ -112,13 +118,13 @@ static void spi_qmsi_callback(void *data, int error, qm_ss_spi_status_t status,
 
 	context = dev->driver_data;
 
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 	spi_control_cs(dev, false);
 #endif
 
 	pending->dev = NULL;
 	context->rc = error;
-	device_sync_call_complete(&context->sync);
+	k_sem_give(&context->device_sync_sem);
 }
 
 static int ss_spi_qmsi_slave_select(struct device *dev, uint32_t slave)
@@ -155,13 +161,15 @@ static int ss_spi_qmsi_transceive(struct device *dev,
 	qm_ss_spi_async_transfer_t *xfer;
 	int rc;
 
-	nano_sem_take(&context->sem, TICKS_UNLIMITED);
+	k_sem_take(&context->sem, K_FOREVER);
 	if (pending_transfers[spi_id].dev) {
-		nano_sem_give(&context->sem);
+		k_sem_give(&context->sem);
 		return -EBUSY;
 	}
 	pending_transfers[spi_id].dev = dev;
-	nano_sem_give(&context->sem);
+	k_sem_give(&context->sem);
+
+	device_busy_set(dev);
 
 	xfer = &pending_transfers[spi_id].xfer;
 
@@ -200,33 +208,36 @@ static int ss_spi_qmsi_transceive(struct device *dev,
 
 	rc = qm_ss_spi_set_config(spi_id, cfg);
 	if (rc != 0) {
+		device_busy_clear(dev);
 		return -EINVAL;
 	}
 
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 	spi_control_cs(dev, true);
 #endif
 
 	rc = qm_ss_spi_irq_transfer(spi_id, xfer);
 	if (rc != 0) {
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 		spi_control_cs(dev, false);
 #endif
+		device_busy_clear(dev);
 		return -EIO;
 	}
 
-	device_sync_call_wait(&context->sync);
+	k_sem_take(&context->device_sync_sem, K_FOREVER);
 
+	device_busy_clear(dev);
 	return context->rc ? -EIO : 0;
 }
 
-static struct spi_driver_api ss_spi_qmsi_api = {
+static const struct spi_driver_api ss_spi_qmsi_api = {
 	.configure = ss_spi_qmsi_configure,
 	.slave_select = ss_spi_qmsi_slave_select,
 	.transceive = ss_spi_qmsi_transceive,
 };
 
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 static struct device *gpio_cs_init(const struct ss_spi_qmsi_config *config)
 {
 	struct device *gpio;
@@ -247,40 +258,110 @@ static struct device *gpio_cs_init(const struct ss_spi_qmsi_config *config)
 
 static int ss_spi_qmsi_init(struct device *dev);
 
-#ifdef CONFIG_SPI_0
-static struct ss_spi_qmsi_config spi_qmsi_mst_0_config = {
+
+#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+static void ss_spi_master_set_power_state(struct device *dev,
+					  uint32_t power_state)
+{
+	struct ss_spi_qmsi_runtime *context = dev->driver_data;
+
+	context->device_power_state = power_state;
+}
+
+static uint32_t ss_spi_master_get_power_state(struct device *dev)
+{
+	struct ss_spi_qmsi_runtime *context = dev->driver_data;
+
+	return context->device_power_state;
+}
+
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+static int ss_spi_master_suspend_device(struct device *dev)
+{
+	if (device_busy_check(dev)) {
+		return -EBUSY;
+	}
+
+	const struct ss_spi_qmsi_config *config = dev->config->config_info;
+	struct ss_spi_qmsi_runtime *drv_data = dev->driver_data;
+
+	qm_ss_spi_save_context(config->spi, &drv_data->spi_ctx);
+
+	ss_spi_master_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
+
+	return 0;
+}
+
+static int ss_spi_master_resume_device_from_suspend(struct device *dev)
+{
+	const struct ss_spi_qmsi_config *config = dev->config->config_info;
+	struct ss_spi_qmsi_runtime *drv_data = dev->driver_data;
+
+	qm_ss_spi_restore_context(config->spi, &drv_data->spi_ctx);
+
+	ss_spi_master_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
+	return 0;
+}
+#endif /* CONFIG_SYS_POWER_DEEP_SLEEP */
+
+/*
+* Implements the driver control management functionality
+* the *context may include IN data or/and OUT data
+*/
+static int ss_spi_master_qmsi_device_ctrl(struct device *port,
+				       uint32_t ctrl_command, void *context)
+{
+	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
+			return ss_spi_master_suspend_device(port);
+		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
+			return ss_spi_master_resume_device_from_suspend(port);
+		}
+#endif /* CONFIG_SYS_POWER_DEEP_SLEEP */
+	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
+		*((uint32_t *)context) = ss_spi_master_get_power_state(port);
+	}
+	return 0;
+}
+#else
+#define ss_spi_master_set_power_state(...)
+#endif /* CONFIG_DEVICE_POWER_MANAGEMENT */
+
+#ifdef CONFIG_SPI_SS_0
+static const struct ss_spi_qmsi_config spi_qmsi_mst_0_config = {
 	.spi = QM_SS_SPI_0,
-#ifdef CONFIG_SPI_CS_GPIO
-	.cs_port = CONFIG_SPI_0_CS_GPIO_PORT,
-	.cs_pin = CONFIG_SPI_0_CS_GPIO_PIN,
+#ifdef CONFIG_SPI_SS_CS_GPIO
+	.cs_port = CONFIG_SPI_SS_0_CS_GPIO_PORT,
+	.cs_pin = CONFIG_SPI_SS_0_CS_GPIO_PIN,
 #endif
 };
 
 static struct ss_spi_qmsi_runtime spi_qmsi_mst_0_runtime;
 
-DEVICE_INIT(ss_spi_master_0, CONFIG_SPI_0_NAME,
-	    ss_spi_qmsi_init, &spi_qmsi_mst_0_runtime, &spi_qmsi_mst_0_config,
-	    SECONDARY, CONFIG_SPI_INIT_PRIORITY);
+DEVICE_DEFINE(ss_spi_master_0, CONFIG_SPI_SS_0_NAME, ss_spi_qmsi_init,
+	      ss_spi_master_qmsi_device_ctrl, &spi_qmsi_mst_0_runtime,
+	      &spi_qmsi_mst_0_config, POST_KERNEL, CONFIG_SPI_SS_INIT_PRIORITY,
+	      NULL);
+#endif /* CONFIG_SPI_SS_0 */
 
-
-#endif /* CONFIG_SPI_0 */
-#ifdef CONFIG_SPI_1
-
-static struct ss_spi_qmsi_config spi_qmsi_mst_1_config = {
+#ifdef CONFIG_SPI_SS_1
+static const struct ss_spi_qmsi_config spi_qmsi_mst_1_config = {
 	.spi = QM_SS_SPI_1,
-#ifdef CONFIG_SPI_CS_GPIO
-	.cs_port = CONFIG_SPI_1_CS_GPIO_PORT,
-	.cs_pin = CONFIG_SPI_1_CS_GPIO_PIN,
+#ifdef CONFIG_SPI_SS_CS_GPIO
+	.cs_port = CONFIG_SPI_SS_1_CS_GPIO_PORT,
+	.cs_pin = CONFIG_SPI_SS_1_CS_GPIO_PIN,
 #endif
 };
 
 static struct ss_spi_qmsi_runtime spi_qmsi_mst_1_runtime;
 
-DEVICE_INIT(ss_spi_master_1, CONFIG_SPI_1_NAME,
-	    ss_spi_qmsi_init, &spi_qmsi_mst_1_runtime, &spi_qmsi_mst_1_config,
-	    SECONDARY, CONFIG_SPI_INIT_PRIORITY);
-
-#endif /* CONFIG_SPI_1 */
+DEVICE_DEFINE(ss_spi_master_1, CONFIG_SPI_SS_1_NAME, ss_spi_qmsi_init,
+	      ss_spi_master_qmsi_device_ctrl, &spi_qmsi_mst_1_runtime,
+	      &spi_qmsi_mst_1_config, POST_KERNEL, CONFIG_SPI_SS_INIT_PRIORITY,
+	      NULL);
+#endif /* CONFIG_SPI_SS_1 */
 
 static void ss_spi_err_isr(void *arg)
 {
@@ -288,9 +369,9 @@ static void ss_spi_err_isr(void *arg)
 	const struct ss_spi_qmsi_config *spi_config = dev->config->config_info;
 
 	if (spi_config->spi == QM_SS_SPI_0) {
-		qm_ss_spi_0_err_isr(NULL);
+		qm_ss_spi_0_error_isr(NULL);
 	} else {
-		qm_ss_spi_1_err_isr(NULL);
+		qm_ss_spi_1_error_isr(NULL);
 	}
 }
 
@@ -300,9 +381,9 @@ static void ss_spi_rx_isr(void *arg)
 	const struct ss_spi_qmsi_config *spi_config = dev->config->config_info;
 
 	if (spi_config->spi == QM_SS_SPI_0) {
-		qm_ss_spi_0_rx_isr(NULL);
+		qm_ss_spi_0_rx_avail_isr(NULL);
 	} else {
-		qm_ss_spi_1_rx_isr(NULL);
+		qm_ss_spi_1_rx_avail_isr(NULL);
 	}
 }
 
@@ -312,9 +393,9 @@ static void ss_spi_tx_isr(void *arg)
 	const struct ss_spi_qmsi_config *spi_config = dev->config->config_info;
 
 	if (spi_config->spi == QM_SS_SPI_0) {
-		qm_ss_spi_0_tx_isr(NULL);
+		qm_ss_spi_0_tx_req_isr(NULL);
 	} else {
-		qm_ss_spi_1_tx_isr(NULL);
+		qm_ss_spi_1_tx_req_isr(NULL);
 	}
 }
 
@@ -325,68 +406,70 @@ static int ss_spi_qmsi_init(struct device *dev)
 	uint32_t *scss_intmask = NULL;
 
 	switch (spi_config->spi) {
-#ifdef CONFIG_SPI_0
+#ifdef CONFIG_SPI_SS_0
 	case QM_SS_SPI_0:
-		IRQ_CONNECT(IRQ_SPI0_ERR_INT, CONFIG_SPI_0_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI0_ERR_INT, CONFIG_SPI_SS_0_IRQ_PRI,
 			    ss_spi_err_isr, DEVICE_GET(ss_spi_master_0), 0);
 		irq_enable(IRQ_SPI0_ERR_INT);
 
-		IRQ_CONNECT(IRQ_SPI0_RX_AVAIL, CONFIG_SPI_0_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI0_RX_AVAIL, CONFIG_SPI_SS_0_IRQ_PRI,
 			    ss_spi_rx_isr, DEVICE_GET(ss_spi_master_0), 0);
 		irq_enable(IRQ_SPI0_RX_AVAIL);
 
-		IRQ_CONNECT(IRQ_SPI0_TX_REQ, CONFIG_SPI_0_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI0_TX_REQ, CONFIG_SPI_SS_0_IRQ_PRI,
 			    ss_spi_tx_isr, DEVICE_GET(ss_spi_master_0), 0);
 		irq_enable(IRQ_SPI0_TX_REQ);
 
 		ss_clk_spi_enable(0);
 
 		/* Route SPI interrupts to Sensor Subsystem */
-		scss_intmask = (uint32_t *)&QM_SCSS_INT->int_ss_spi_0;
+		scss_intmask = (uint32_t *)&QM_INTERRUPT_ROUTER->ss_spi_0_int;
 		*scss_intmask &= ~BIT(8);
 		scss_intmask++;
 		*scss_intmask &= ~BIT(8);
 		scss_intmask++;
 		*scss_intmask &= ~BIT(8);
 		break;
-#endif /* CONFIG_SPI_0 */
+#endif /* CONFIG_SPI_SS_0 */
 
-#ifdef CONFIG_SPI_1
+#ifdef CONFIG_SPI_SS_1
 	case QM_SS_SPI_1:
-		IRQ_CONNECT(IRQ_SPI1_ERR_INT, CONFIG_SPI_1_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI1_ERR_INT, CONFIG_SPI_SS_1_IRQ_PRI,
 			    ss_spi_err_isr, DEVICE_GET(ss_spi_master_1), 0);
 		irq_enable(IRQ_SPI1_ERR_INT);
 
-		IRQ_CONNECT(IRQ_SPI1_RX_AVAIL, CONFIG_SPI_1_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI1_RX_AVAIL, CONFIG_SPI_SS_1_IRQ_PRI,
 			    ss_spi_rx_isr, DEVICE_GET(ss_spi_master_1), 0);
 		irq_enable(IRQ_SPI1_RX_AVAIL);
 
-		IRQ_CONNECT(IRQ_SPI1_TX_REQ, CONFIG_SPI_1_IRQ_PRI,
+		IRQ_CONNECT(IRQ_SPI1_TX_REQ, CONFIG_SPI_SS_1_IRQ_PRI,
 			    ss_spi_tx_isr, DEVICE_GET(ss_spi_master_1), 0);
 		irq_enable(IRQ_SPI1_TX_REQ);
 
 		ss_clk_spi_enable(1);
 
 		/* Route SPI interrupts to Sensor Subsystem */
-		scss_intmask = (uint32_t *)&QM_SCSS_INT->int_ss_spi_1;
+		scss_intmask = (uint32_t *)&QM_INTERRUPT_ROUTER->ss_spi_1_int;
 		*scss_intmask &= ~BIT(8);
 		scss_intmask++;
 		*scss_intmask &= ~BIT(8);
 		scss_intmask++;
 		*scss_intmask &= ~BIT(8);
 		break;
-#endif /* CONFIG_SPI_1 */
+#endif /* CONFIG_SPI_SS_1 */
 
 	default:
 		return -EIO;
 	}
 
-#ifdef CONFIG_SPI_CS_GPIO
+#ifdef CONFIG_SPI_SS_CS_GPIO
 	context->gpio_cs = gpio_cs_init(spi_config);
 #endif
-	device_sync_call_init(&context->sync);
-	nano_sem_init(&context->sem);
-	nano_sem_give(&context->sem);
+	k_sem_init(&context->device_sync_sem, 0, UINT_MAX);
+	k_sem_init(&context->sem, 0, UINT_MAX);
+	k_sem_give(&context->sem);
+
+	ss_spi_master_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
 
 	dev->driver_api = &ss_spi_qmsi_api;
 

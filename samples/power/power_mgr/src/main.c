@@ -17,90 +17,63 @@
 #include <zephyr.h>
 #include <power.h>
 #include <soc_power.h>
-#include <gpio.h>
 #include <misc/printk.h>
 #include <string.h>
 #include <rtc.h>
 
 #define SECONDS_TO_SLEEP	5
 #define ALARM		(RTC_ALARM_SECOND * (SECONDS_TO_SLEEP - 1))
-#define SLEEPTICKS	SECONDS(SECONDS_TO_SLEEP)
 #define GPIO_IN_PIN	16
 
 static void create_device_list(void);
-static void suspend_devices(int pm_policy);
-static void resume_devices(int pm_policy);
+static void suspend_devices(void);
+static void resume_devices(void);
 
 static struct device *device_list;
 static int device_count;
+
+static int post_ops_done = 1;
 
 /*
  * Example ordered list to store devices on which
  * device power policies would be executed.
  */
 #define DEVICE_POLICY_MAX 15
-static char device_policy_list[DEVICE_POLICY_MAX];
+static char device_ordered_list[DEVICE_POLICY_MAX];
 static char device_retval[DEVICE_POLICY_MAX];
-
-static struct device *gpio_dev;
-static int setup_gpio(void);
-static int wait_gpio_low(void);
 
 static struct device *rtc_dev;
 static uint32_t start_time, end_time;
 static void setup_rtc(void);
 static void enable_wake_event(void);
 
-static int test_started;
+int pm_state;
 
 void main(void)
 {
-	printk("Power Management Demo\n");
+	printk("Power Management Demo on %s\n", CONFIG_ARCH);
 
-	if (setup_gpio()) {
-		printk("Test aborted\n");
-		return;
-	}
-
-	/*
-	 * This is a safety measure to avoid
-	 * bricking boards if anything went wrong.
-	 * The pause here will allow re-flashing.
-	 *
-	 * Toggle GPIO pin 16 in following sequence:-
-	 * (GPIO Pin 16 is DIO 8 in arduino_101 and
-	 * DIO 4 in quark_se_c1000_devboard.)
-	 * 1) Start connected to GND during power on or reset.
-	 * 2) Disconnect from GND and connect to 3.3V
-	 * 3) Disconnect from 3.3V. Test should start now.
-	 *
-	 */
-	printk("Toggle gpio pin 16 to start test\n");
-	if (wait_gpio_low()) {
-		printk("Test aborted\n");
-		return;
-	}
-
-	printk("PM test started\n");
 	setup_rtc();
-	test_started = 1;
 
 	create_device_list();
 
 	while (1) {
-		task_sleep(SLEEPTICKS);
+		printk("\nApplication main thread\n");
+		k_sleep(SECONDS_TO_SLEEP * 1000);
 	}
 }
 
 static int check_pm_policy(int32_t ticks)
 {
 	static int policy;
+	int power_states[] = {SYS_POWER_STATE_MAX, SYS_POWER_STATE_CPU_LPS,
+		SYS_POWER_STATE_DEEP_SLEEP};
 
 	/*
 	 * Compare time available with wake latencies and select
 	 * appropriate power saving policy
 	 *
-	 * For the demo we will alternate between following states
+	 * For the demo we will alternate between following policies
 	 *
 	 * 0 = no power saving operation
 	 * 1 = low power state
@@ -108,68 +81,78 @@ static int check_pm_policy(int32_t ticks)
 	 *
 	 */
 
-	/* Set the max val to 1 if deep sleep is not supported */
-	policy = (policy > 2 ? 0 : policy);
+#if (defined(CONFIG_SYS_POWER_DEEP_SLEEP))
+	policy = (++policy > 2 ? 0 : policy);
+	/*
+	 * If deep sleep was selected, we need to check if any device is in
+	 * the middle of a transaction
+	 *
+	 * Use device_busy_check() to check specific devices
+	 */
+	if ((policy == 2) && device_any_busy_check()) {
+		/* Devices are busy - do CPU LPS instead */
+		policy = 1;
+	}
+#else
+	policy = (++policy > 1 ? 0 : policy);
+#endif
 
-	return policy++;
+	return power_states[policy];
 }
 
 static void low_power_state_exit(void)
 {
-	resume_devices(SYS_PM_LOW_POWER_STATE);
+	/* Turn on suspended peripherals/clocks as necessary */
 
 	end_time = rtc_read(rtc_dev);
-	printk("\nLow power state policy exit!\n");
+	printk("\nLow power state exit!\n");
 	printk("Total Elapsed From Suspend To Resume = %d RTC Cycles\n",
 			end_time - start_time);
 }
 
 static void deep_sleep_exit(void)
 {
-	resume_devices(SYS_PM_DEEP_SLEEP);
+	/* Turn on peripherals and restore device states as necessary */
+	resume_devices();
 
 	printk("Wake from Deep Sleep!\n");
 
 	end_time = rtc_read(rtc_dev);
-	printk("\nDeep sleep policy exit!\n");
+	printk("\nDeep sleep exit!\n");
 	printk("Total Elapsed From Suspend To Resume = %d RTC Cycles\n",
 			end_time - start_time);
 }
 
 static int low_power_state_entry(int32_t ticks)
 {
-	printk("\n\nLow power state policy entry!\n");
+	printk("\nLow power state entry!\n");
 
-	/* Turn off peripherals/clocks here */
-	suspend_devices(SYS_PM_LOW_POWER_STATE);
+	start_time = rtc_read(rtc_dev);
 
-	_sys_soc_set_power_policy(SYS_PM_LOW_POWER_STATE);
+	/* Turn off peripherals/clocks as necessary */
 
-	_sys_soc_put_low_power_state();
+	enable_wake_event();
+
+	_sys_soc_set_power_state(SYS_POWER_STATE_CPU_LPS);
 
 	return SYS_PM_LOW_POWER_STATE;
 }
 
 static int deep_sleep_entry(int32_t ticks)
 {
-	printk("\n\nDeep sleep policy entry!\n");
+	printk("\nDeep sleep entry!\n");
 
-	/* Don't need wake event notification */
-	_sys_soc_disable_wake_event_notification();
+	start_time = rtc_read(rtc_dev);
 
-	/* Turn off peripherals/clocks here */
-	suspend_devices(SYS_PM_DEEP_SLEEP);
+	/* Don't need pm idle exit event notification */
+	_sys_soc_pm_idle_exit_notification_disable();
 
-	_sys_soc_set_power_policy(SYS_PM_DEEP_SLEEP);
+	/* Save device states and turn off peripherals as necessary */
+	suspend_devices();
 
-	/*
-	 * Returns 0 when context is saved.
-	 * Returns 1 when context was restored and control was
-	 * transferred to it during DS resume.
-	 */
-	if (!_sys_soc_save_cpu_context()) {
-		_sys_soc_put_deep_sleep();
-	}
+	enable_wake_event();
+
+	_sys_soc_set_power_state(SYS_POWER_STATE_DEEP_SLEEP);
 
 	/*
 	 * At this point system has woken up from
@@ -178,52 +161,60 @@ static int deep_sleep_entry(int32_t ticks)
 
 	deep_sleep_exit();
 
-	/* Clear current power policy */
-	_sys_soc_set_power_policy(SYS_PM_ACTIVE_STATE);
-
 	return SYS_PM_DEEP_SLEEP;
 }
 
 int _sys_soc_suspend(int32_t ticks)
 {
-	int pm_state;
 	int ret = SYS_PM_NOT_HANDLED;
+
+	post_ops_done = 0;
+
+	if (ticks < (SECONDS_TO_SLEEP * CONFIG_SYS_CLOCK_TICKS_PER_SEC)) {
+		printk("Not enough time for PM operations (ticks: %d).\n",
+		       ticks);
+		return SYS_PM_NOT_HANDLED;
+	}
 
 	pm_state = check_pm_policy(ticks);
 
 	switch (pm_state) {
-	case 1: /* CPU LPS */
-		start_time = rtc_read(rtc_dev);
-		enable_wake_event();
+	case SYS_POWER_STATE_CPU_LPS:
+		/* Do CPU LPS operations */
 		ret = low_power_state_entry(ticks);
 		break;
-	case 2: /* Deep Sleep */
-		/*
-		 * if the policy manager chooses to go to deep sleep, we need to
-		 * check if any device is in the middle of a transaction
-		 */
-		if (!device_any_busy_check()) {
-			/* Do deep sleep operations */
-			start_time = rtc_read(rtc_dev);
-			enable_wake_event();
-			ret = deep_sleep_entry(ticks);
-			if (ret == SYS_PM_DEEP_SLEEP) {
-				/*
-				 * Do any arch or soc specific post
-				 * operations specific to deep sleep.
-				 *
-				 * This would enable interrupts so
-				 * it should be done right before
-				 * function return
-				 */
-				_sys_soc_deep_sleep_post_ops();
-			}
-		}
+	case SYS_POWER_STATE_DEEP_SLEEP:
+		/* Do deep sleep operations */
+		ret = deep_sleep_entry(ticks);
 		break;
 	default:
 		/* No PM operations */
+		printk("\nNo PM operations done\n");
 		ret = SYS_PM_NOT_HANDLED;
 		break;
+	}
+
+	if (ret != SYS_PM_NOT_HANDLED) {
+		/*
+		 * Do any arch or soc specific post operations specific to the
+		 * power state.
+		 *
+		 * If this enables interrupts, then it should be done
+		 * right before function return.
+		 *
+		 * Some CPU power states would require interrupts to be
+		 * enabled at the time of entering the low power state.
+		 * For such states the post operations need to be done
+		 * at _sys_soc_resume. To avoid doing it twice, check a
+		 * flag.
+		 */
+		if (!post_ops_done) {
+			if (pm_state == SYS_POWER_STATE_CPU_LPS) {
+				low_power_state_exit();
+			}
+			post_ops_done = 1;
+			_sys_soc_power_state_post_ops(pm_state);
+		}
 	}
 
 	return ret;
@@ -231,44 +222,39 @@ int _sys_soc_suspend(int32_t ticks)
 
 void _sys_soc_resume(void)
 {
-	uint32_t pm_policy;
-
-	pm_policy = _sys_soc_get_power_policy();
-
-	/* Clear current power policy */
-	_sys_soc_set_power_policy(SYS_PM_ACTIVE_STATE);
-
-	switch (pm_policy) {
-	case SYS_PM_DEEP_SLEEP:
-		/*
-		 * This should transfer control to the point
-		 * where CPU context was saved. Context was
-		 * saved in _sys_power_save_cpu_context(), which
-		 * was called in deep_sleep_entry();
-		 *
-		 * deep_sleep_exit() will be called at the point
-		 * of resume inside deep_sleep_entry().
-		 */
-		_sys_soc_restore_cpu_context();
-		break;
-	case SYS_PM_LOW_POWER_STATE:
-		low_power_state_exit();
-		break;
-	default:
-		/* cold boot */
-		break;
+	/*
+	 * This notification is called from the ISR of the event
+	 * that caused exit from kernel idling after PM operations.
+	 *
+	 * Some CPU low power states require enabling of interrupts
+	 * atomically when entering those states. The wake up from
+	 * such a state first executes code in the ISR of the interrupt
+	 * that caused the wake. This hook will be called from the ISR.
+	 * For such CPU LPS states, do post operations and restores here.
+	 * The kernel scheduler will get control after the ISR finishes
+	 * and it may schedule another thread.
+	 *
+	 * Call _sys_soc_pm_idle_exit_notification_disable() if this
+	 * notification is not required.
+	 */
+	if (!post_ops_done) {
+		if (pm_state == SYS_POWER_STATE_CPU_LPS) {
+			low_power_state_exit();
+		}
+		post_ops_done = 1;
+		_sys_soc_power_state_post_ops(pm_state);
 	}
 }
 
-static void suspend_devices(int pm_policy)
+static void suspend_devices(void)
 {
 	int i;
 
 	for (i = device_count - 1; i >= 0; i--) {
-		int idx = device_policy_list[i];
+		int idx = device_ordered_list[i];
 
 		/* If necessary  the policy manager can check if a specific
-		 * device in the policy list is busy as shown below :
+		 * device in the device list is busy as shown below :
 		 * if(device_busy_check(&device_list[idx])) {do something}
 		 */
 		device_retval[i] = device_set_power_state(&device_list[idx],
@@ -276,13 +262,14 @@ static void suspend_devices(int pm_policy)
 	}
 }
 
-static void resume_devices(int pm_policy)
+static void resume_devices(void)
 {
 	int i;
 
 	for (i = 0; i < device_count; i++) {
 		if (!device_retval[i]) {
-			int idx = device_policy_list[i];
+			int idx = device_ordered_list[i];
+
 			device_set_power_state(&device_list[idx],
 						DEVICE_PM_ACTIVE_STATE);
 		}
@@ -303,74 +290,40 @@ static void create_device_list(void)
 	 * in the beginning of the list will be resumed first.
 	 *
 	 * Other devices depend on APICs so ioapic and loapic devices
-	 * will be placed first in the device policy list. Move any
+	 * will be placed first in the device ordered list. Move any
 	 * other devices to the beginning as necessary. e.g. uart
 	 * is useful to enable early prints.
 	 */
 	device_list_get(&device_list, &count);
 
+#if (CONFIG_X86)
 	device_count = 3; /* Reserve for ioapic, loapic and uart */
 
 	for (i = 0; (i < count) && (device_count < DEVICE_POLICY_MAX); i++) {
 		if (!strcmp(device_list[i].config->name, "loapic")) {
-			device_policy_list[0] = i;
+			device_ordered_list[0] = i;
 		} else if (!strcmp(device_list[i].config->name, "ioapic")) {
-			device_policy_list[1] = i;
+			device_ordered_list[1] = i;
 		} else if (!strcmp(device_list[i].config->name, "UART_0")) {
-			device_policy_list[2] = i;
+			device_ordered_list[2] = i;
 		} else {
-			device_policy_list[device_count++] = i;
+			device_ordered_list[device_count++] = i;
 		}
 	}
-}
+#elif (CONFIG_ARC)
+	device_count = 1; /* Reserve for irq unit */
 
-static int setup_gpio(void)
-{
-	int ret;
-
-	gpio_dev = device_get_binding("GPIO_0");
-	if (!gpio_dev) {
-		printk("Cannot find %s!\n", "GPIO_0");
-		return 1;
-	}
-
-	/* Setup GPIO input */
-	ret = gpio_pin_configure(gpio_dev, GPIO_IN_PIN, (GPIO_DIR_IN));
-	if (ret) {
-		printk("Error configuring GPIO!\n");
-		return ret;
-	}
-
-	return 0;
-}
-
-static int wait_gpio_low(void)
-{
-	int ret;
-	uint32_t v;
-
-	/* Start with high */
-	do {
-		ret = gpio_pin_read(gpio_dev, GPIO_IN_PIN, &v);
-		if (ret) {
-			printk("Error reading GPIO!\n");
-			return ret;
+	for (i = 0; (i < count) && (device_count < DEVICE_POLICY_MAX); i++) {
+		if (!strcmp(device_list[i].config->name, "arc_v2_irq_unit")) {
+			device_ordered_list[0] = i;
+		} else {
+			device_ordered_list[device_count++] = i;
 		}
-	} while (!v);
-
-	/* Wait till low */
-	do {
-		ret = gpio_pin_read(gpio_dev, GPIO_IN_PIN, &v);
-		if (ret) {
-			printk("Error reading GPIO!\n");
-			return ret;
-		}
-	} while (v);
-
-	return 0;
+	}
+#endif
 }
 
-void rtc_interrupt_fn(struct device *rtc_dev)
+static void rtc_interrupt_fn(struct device *rtc_dev)
 {
 	printk("Wake up event handler\n");
 }
@@ -394,8 +347,13 @@ static void setup_rtc(void)
 
 static void enable_wake_event(void)
 {
+	uint32_t now = rtc_read(rtc_dev);
 	uint32_t alarm;
 
 	alarm = (rtc_read(rtc_dev) + ALARM);
 	rtc_set_alarm(rtc_dev, alarm);
+
+	/* Wait a few ticks to ensure the alarm value gets loaded */
+	while (rtc_read(rtc_dev) < now + 5)
+		;
 }

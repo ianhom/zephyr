@@ -53,43 +53,6 @@ High-level calls accessed through devices's specific API, such as i2c.h
 or spi.h, are usually intended as synchronous. Thus, these calls should be
 blocking.
 
-Due to the fact that Zephyr provides two types of execution contexts (task
-and fiber) on a microkernel, drivers need to act accordingly. For example, a
-nanokernel semaphore cannot be used when the context is a task, so the
-:file:`include/device.h` exposes a helper API to handle this case transparently;
-no other means ought to be used instead.
-
-Zephyr API exposes 1 type and 3 inline functions to solve this issue.
-
-``device_sync_call_t``
-
-   This type provides a nanokernel semaphore, always present in both nanokernel
-   and microkernel use cases. It is meant to be used within a fiber context.
-   Then, and only on a microkernel type, it will provide a kernel semaphore
-   meant to be used within a task context. A boolean marker is used to remember
-   the caller's context when running a microkernel.
-
-:cpp:func:`device_sync_call_init()`
-
-   This function initializes the ``device_sync_call_t`` type semaphores and the
-   marker. This function should be used only once in the device driver's instance
-   lifetime. Thus, the driver's initialization function is the best place for
-   calling it.
-
-:cpp:func:`device_sync_call_wait()`
-
-   This function will block - that is, it will perform a "take wait" - on the
-   relevant semaphore. The exposed driver's API function can then be used as a
-   blocking function until the relevant semaphore is released by a ``give``.
-   This is therefore used to start a synchronous call, and waits until being
-   signaled for synchronization.
-
-:cpp:func:`device_sync_call_complete()`
-
-   This function releases the relevant semaphore and thus will unlock the blocking
-   function. Most frequently will it be called in the driver's ISR handler. It is
-   used to signal the completion of the synchronous call (error or success).
-
 Driver APIs
 ***********
 
@@ -282,7 +245,7 @@ Then when the particular instance is declared:
                     DEVICE_GET(my_driver_0), MY_DRIVER_0_FLAGS);
   }
 
-  static struct my_driver_config my_driver_config_0 = {
+  const static struct my_driver_config my_driver_config_0 = {
         .base_addr = MY_DRIVER_0_BASE_ADDR;
         .config_func = my_driver_config_irq_0;
   }
@@ -306,7 +269,7 @@ require the use of kernel services. The DEVICE_INIT() APIs allow the user to
 specify at what time during the boot sequence the init function will be
 executed. Any driver will specify one of five initialization levels:
 
-`PRIMARY`
+`PRE_KERNEL_1`
         Used for devices that have no dependencies, such as those that rely
         solely on hardware present in the processor/SOC. These devices cannot
         use any kernel services during configuration, since the services are
@@ -314,30 +277,21 @@ executed. Any driver will specify one of five initialization levels:
         so it's OK to set up interrupts. Init functions at this level run on the
         interrupt stack.
 
-`SECONDARY`
+`PRE_KERNEL_2`
         Used for devices that rely on the initialization of devices initialized
         as part of the PRIMARY level. These devices cannot use any kernel
         services during configuration, since the kerne services are not yet
         available. Init functions at this level run on the interrupt stack.
 
-`NANOKERNEL`
-        Used for devices that require nanokernel services during configuration.
-        Init functions at this level run in context of the nanokernel
-        background task or microkernel idle task depending on kernel
-        configuration.
-
-`MICROKERNEL`
-        Used for devices that require microkernel services during
-        configuration.  Init functions at this level run in context of the
-        microkernel idle task. This init level is skipped if the microkernel is
-        not enabled.
+`POST_KERNEL`
+        Used for devices that require kernel services during configuration.
+        Init functions at this level run in context of the kernel main task.
 
 `APPLICATION`
         Used for application components (i.e. non-kernel components) that need
         automatic configuration. These devices can use all services provided by
         the kernel during configuration. Init functions at this level run on
-        either the nanokernel background task or microkernel idle task
-        depending on kernel configuration.
+        the kernel main task.
 
 Within each initialization level you may specify a priority level, relative to
 other devices in the same initialization level. The priority level is specified

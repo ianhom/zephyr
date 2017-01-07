@@ -49,8 +49,6 @@ source "drivers/gpio/Kconfig.dw"
 
 source "drivers/gpio/Kconfig.pcal9535a"
 
-source "drivers/gpio/Kconfig.mmio"
-
 source "drivers/gpio/Kconfig.qmsi"
 
 source "drivers/gpio/Kconfig.sch"
@@ -62,5 +60,9 @@ source "drivers/gpio/Kconfig.atmel_sam3"
 source "drivers/gpio/Kconfig.stm32"
 
 source "drivers/gpio/Kconfig.nrf5"
+
+source "drivers/gpio/Kconfig.cmsdk_ahb"
+
+source "drivers/gpio/Kconfig.cc32xx"
 
 endif # GPIO

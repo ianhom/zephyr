@@ -1,4 +1,3 @@
-KERNEL_TYPE = nano
 BOARD ?= nrf52_pca10040
 CONF_FILE = prj.conf
 

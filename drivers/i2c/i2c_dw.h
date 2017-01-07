@@ -95,12 +95,8 @@ typedef void (*i2c_isr_cb_t)(struct device *port);
 
 
 struct i2c_dw_rom_config {
-	uint32_t        base_address;
-	uint32_t        irq_num;
+	uint32_t	irq_num;
 	uint32_t        interrupt_mask;
-#ifdef CONFIG_PCI
-	struct pci_dev_info pci_dev;
-#endif /* CONFIG_PCI */
 	i2c_isr_cb_t	config_func;
 
 #ifdef CONFIG_I2C_SHARED_IRQ
@@ -110,7 +106,8 @@ struct i2c_dw_rom_config {
 
 
 struct i2c_dw_dev_config {
-	device_sync_call_t	sync;
+	uint32_t base_address;
+	struct k_sem		device_sync_sem;
 	union dev_config	app_config;
 
 
@@ -125,6 +122,9 @@ struct i2c_dw_dev_config {
 	uint8_t			request_bytes;
 	uint8_t			xfr_flags;
 	bool			support_hs_mode;
+#ifdef CONFIG_PCI
+	struct pci_dev_info pci_dev;
+#endif /* CONFIG_PCI */
 };
 
 #ifdef __cplusplus

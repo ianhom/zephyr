@@ -25,12 +25,10 @@
 
 #define CONTROLLER_INDEX 0
 #define DATA_MTU 230
-#define CHANNELS 1
+#define CHANNELS 2
 #define SERVERS 1
 
-static struct nano_fifo data_fifo;
-static NET_BUF_POOL(data_pool, 1, DATA_MTU, &data_fifo, NULL,
-		    BT_BUF_USER_DATA_MIN);
+NET_BUF_POOL_DEFINE(data_pool, 1, DATA_MTU, BT_BUF_USER_DATA_MIN, NULL);
 
 static struct channel {
 	uint8_t chan_id; /* Internal number that identifies L2CAP channel. */
@@ -42,7 +40,7 @@ static struct bt_l2cap_server servers[SERVERS];
 
 static struct net_buf *alloc_buf_cb(struct bt_l2cap_chan *chan)
 {
-	return net_buf_get(&data_fifo, 0);
+	return net_buf_alloc(&data_pool, K_FOREVER);
 }
 
 static uint8_t recv_cb_buf[DATA_MTU + sizeof(struct l2cap_data_received_ev)];
@@ -217,14 +215,10 @@ static void send_data(uint8_t *data, uint16_t len)
 		goto fail;
 	}
 
-	buf = net_buf_get_timeout(&data_fifo, BT_L2CAP_CHAN_SEND_RESERVE,
-				  TICKS_UNLIMITED);
-	if (!buf) {
-		SYS_LOG_ERR("Out of buffers");
-		goto fail;
-	}
+	buf = net_buf_alloc(&data_pool, K_FOREVER);
+	net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
 
-	memcpy(net_buf_add(buf, data_len), cmd->data, data_len);
+	net_buf_add_mem(buf, cmd->data, data_len);
 	ret = bt_l2cap_chan_send(&chan->le.chan, buf);
 	if (ret < 0) {
 		SYS_LOG_ERR("Unable to send data: %d", -ret);
@@ -364,7 +358,5 @@ void tester_handle_l2cap(uint8_t opcode, uint8_t index, uint8_t *data,
 
 uint8_t tester_init_l2cap(void)
 {
-	net_buf_pool_init(data_pool);
-
 	return BTP_STATUS_SUCCESS;
 }

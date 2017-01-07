@@ -20,7 +20,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <misc/util.h>
 #include <gpio.h>
@@ -29,7 +29,7 @@
 #include "gpio_pcal9535a.h"
 
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_GPIO_PCAL9535A_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 /* Register definitions */
 #define REG_INPUT_PORT0			0x00
@@ -527,7 +527,7 @@ static int gpio_pcal9535a_disable_callback(struct device *dev,
 	return -ENOTSUP;
 }
 
-static struct gpio_driver_api gpio_pcal9535a_drv_api_funcs = {
+static const struct gpio_driver_api gpio_pcal9535a_drv_api_funcs = {
 	.config = gpio_pcal9535a_config,
 	.write = gpio_pcal9535a_write,
 	.read = gpio_pcal9535a_read,
@@ -542,7 +542,7 @@ static struct gpio_driver_api gpio_pcal9535a_drv_api_funcs = {
  * @param dev Device struct
  * @return 0 if successful, failed otherwise.
  */
-int gpio_pcal9535a_init(struct device *dev)
+static int gpio_pcal9535a_init(struct device *dev)
 {
 	const struct gpio_pcal9535a_config * const config =
 		dev->config->config_info;
@@ -569,7 +569,7 @@ int gpio_pcal9535a_init(struct device *dev)
 #include <device.h>
 #include <init.h>
 
-static struct gpio_pcal9535a_config gpio_pcal9535a_0_cfg = {
+static const struct gpio_pcal9535a_config gpio_pcal9535a_0_cfg = {
 	.i2c_master_dev_name = CONFIG_GPIO_PCAL9535A_0_I2C_MASTER_DEV_NAME,
 	.i2c_slave_addr = CONFIG_GPIO_PCAL9535A_0_I2C_ADDR,
 };
@@ -587,7 +587,7 @@ static struct gpio_pcal9535a_drv_data gpio_pcal9535a_0_drvdata = {
 DEVICE_INIT(gpio_pcal9535a_0, CONFIG_GPIO_PCAL9535A_0_DEV_NAME,
 	    gpio_pcal9535a_init,
 	    &gpio_pcal9535a_0_drvdata, &gpio_pcal9535a_0_cfg,
-	    SECONDARY, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
+	    POST_KERNEL, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
 
 #endif /* CONFIG_GPIO_PCAL9535A_0 */
 
@@ -596,7 +596,7 @@ DEVICE_INIT(gpio_pcal9535a_0, CONFIG_GPIO_PCAL9535A_0_DEV_NAME,
 #include <device.h>
 #include <init.h>
 
-static struct gpio_pcal9535a_config gpio_pcal9535a_1_cfg = {
+static const struct gpio_pcal9535a_config gpio_pcal9535a_1_cfg = {
 	.i2c_master_dev_name = CONFIG_GPIO_PCAL9535A_1_I2C_MASTER_DEV_NAME,
 	.i2c_slave_addr = CONFIG_GPIO_PCAL9535A_1_I2C_ADDR,
 };
@@ -614,7 +614,7 @@ static struct gpio_pcal9535a_drv_data gpio_pcal9535a_1_drvdata = {
 DEVICE_INIT(gpio_pcal9535a_1, CONFIG_GPIO_PCAL9535A_1_DEV_NAME,
 	    gpio_pcal9535a_init,
 	    &gpio_pcal9535a_1_drvdata, &gpio_pcal9535a_1_cfg,
-	    SECONDARY, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
+	    POST_KERNEL, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
 
 #endif /* CONFIG_GPIO_PCAL9535A_1 */
 
@@ -623,7 +623,7 @@ DEVICE_INIT(gpio_pcal9535a_1, CONFIG_GPIO_PCAL9535A_1_DEV_NAME,
 #include <device.h>
 #include <init.h>
 
-static struct gpio_pcal9535a_config gpio_pcal9535a_2_cfg = {
+static const struct gpio_pcal9535a_config gpio_pcal9535a_2_cfg = {
 	.i2c_master_dev_name = CONFIG_GPIO_PCAL9535A_2_I2C_MASTER_DEV_NAME,
 	.i2c_slave_addr = CONFIG_GPIO_PCAL9535A_2_I2C_ADDR,
 };
@@ -641,7 +641,7 @@ static struct gpio_pcal9535a_drv_data gpio_pcal9535a_2_drvdata = {
 DEVICE_INIT(gpio_pcal9535a_2, CONFIG_GPIO_PCAL9535A_2_DEV_NAME,
 	    gpio_pcal9535a_init,
 	    &gpio_pcal9535a_2_drvdata, &gpio_pcal9535a_2_cfg,
-	    SECONDARY, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
+	    POST_KERNEL, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
 
 #endif /* CONFIG_GPIO_PCAL9535A_2 */
 
@@ -650,7 +650,7 @@ DEVICE_INIT(gpio_pcal9535a_2, CONFIG_GPIO_PCAL9535A_2_DEV_NAME,
 #include <device.h>
 #include <init.h>
 
-static struct gpio_pcal9535a_config gpio_pcal9535a_3_cfg = {
+static const struct gpio_pcal9535a_config gpio_pcal9535a_3_cfg = {
 	.i2c_master_dev_name = CONFIG_GPIO_PCAL9535A_3_I2C_MASTER_DEV_NAME,
 	.i2c_slave_addr = CONFIG_GPIO_PCAL9535A_3_I2C_ADDR,
 };
@@ -668,6 +668,6 @@ static struct gpio_pcal9535a_drv_data gpio_pcal9535a_3_drvdata = {
 DEVICE_INIT(gpio_pcal9535a_3, CONFIG_GPIO_PCAL9535A_3_DEV_NAME,
 	    gpio_pcal9535a_init,
 	    &gpio_pcal9535a_3_drvdata, &gpio_pcal9535a_3_cfg,
-	    SECONDARY, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
+	    POST_KERNEL, CONFIG_GPIO_PCAL9535A_INIT_PRIORITY);
 
 #endif /* CONFIG_GPIO_PCAL9535A_3 */

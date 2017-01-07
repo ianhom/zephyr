@@ -16,7 +16,7 @@
 
 /**
  * @file
- * @brief Nanokernel fatal error handler
+ * @brief Kernel fatal error handler
  *
  * This module provides the _NanoFatalErrorHandler() routine.
  */
@@ -24,8 +24,8 @@
 #include <toolchain.h>
 #include <sections.h>
 
-#include <nanokernel.h>
-#include <nano_private.h>
+#include <kernel.h>
+#include <kernel_structs.h>
 #include <misc/printk.h>
 #include <arch/x86/irq_controller.h>
 #include <arch/x86/segmentation.h>
@@ -54,7 +54,7 @@ const NANO_ESF _default_esf = {
 
 /**
  *
- * @brief Nanokernel fatal error handler
+ * @brief Kernel fatal error handler
  *
  * This routine is called when a fatal error condition is detected by either
  * hardware or software.
@@ -116,7 +116,7 @@ FUNC_NORETURN void _NanoFatalErrorHandler(unsigned int reason,
 	       "eax: 0x%x, ebx: 0x%x, ecx: 0x%x, edx: 0x%x\n"
 	       "esi: 0x%x, edi: 0x%x, ebp: 0%x, esp: 0x%x\n"
 	       "eflags: 0x%x\n",
-	       sys_thread_self_get(),
+	       k_current_get(),
 	       pEsf->cs & 0xFFFF, pEsf->eip,
 	       pEsf->eax, pEsf->ebx, pEsf->ecx, pEsf->edx,
 	       pEsf->esi, pEsf->edi, pEsf->ebp, pEsf->esp,

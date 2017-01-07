@@ -23,7 +23,7 @@
 
 /*
  * The file must not be included directly
- * Include nanokernel/cpu.h instead
+ * Include kernel.h instead
  */
 
 #include <sys_io.h>
@@ -82,7 +82,7 @@ static ALWAYS_INLINE void _do_irq_unlock(void)
 {
 	__asm__ volatile (
 		"sti;\n\t"
-		: :
+		: : : "memory"
 		);
 }
 
@@ -187,11 +187,10 @@ static ALWAYS_INLINE unsigned int find_msb_set(uint32_t op)
 
 
 /**
- *
- *  _NanoTscRead - read timestamp register ensuring serialization
+ *  @brief read timestamp register ensuring serialization
  */
 
-static inline uint64_t _NanoTscRead(void)
+static inline uint64_t _tsc_read(void)
 {
 	union {
 		struct  {

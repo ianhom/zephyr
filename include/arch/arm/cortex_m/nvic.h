@@ -45,11 +45,28 @@ extern "C" {
 
 /* for assembler, only works with constants */
 #define _EXC_PRIO(pri) (((pri) << (8 - CONFIG_NUM_IRQ_PRIO_BITS)) & 0xff)
-#if defined(CONFIG_ZERO_LATENCY_IRQS)
-#define _EXC_IRQ_DEFAULT_PRIO _EXC_PRIO(0x03)
+
+#ifdef CONFIG_ZERO_LATENCY_IRQS
+#define _ZERO_LATENCY_IRQS_RESERVED_PRIO 1
 #else
-#define _EXC_IRQ_DEFAULT_PRIO _EXC_PRIO(0x02)
+#define _ZERO_LATENCY_IRQS_RESERVED_PRIO 0
 #endif
+
+#if defined(CONFIG_CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS) || \
+	defined(CONFIG_CPU_CORTEX_M_HAS_BASEPRI)
+#define _EXCEPTION_RESERVED_PRIO 1
+#else
+#define _EXCEPTION_RESERVED_PRIO 0
+#endif
+
+#define _IRQ_PRIO_OFFSET \
+	(_ZERO_LATENCY_IRQS_RESERVED_PRIO + \
+	 _EXCEPTION_RESERVED_PRIO)
+
+#define _EXC_IRQ_DEFAULT_PRIO _EXC_PRIO(_IRQ_PRIO_OFFSET)
+
+#define _EXC_SVC_PRIO 0
+#define _EXC_FAULT_PRIO 0
 
 /* no exc #0 */
 #define _EXC_RESET 1
@@ -182,10 +199,15 @@ static inline void _NvicIrqUnpend(unsigned int irq)
  * @return N/A
  */
 
-static inline void _NvicIrqPrioSet(unsigned int irq, unsigned int prio)
+static inline void _NvicIrqPrioSet(unsigned int irq, uint8_t prio)
 {
-	__ASSERT(prio < 256, "invalid priority\n");
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	volatile uint32_t * const ipr = &__scs.nvic.ipr[_PRIO_IP_IDX(irq)];
+	*ipr = ((*ipr & ~((uint32_t)0xff << _PRIO_BIT_SHIFT(irq))) |
+		((uint32_t)prio << _PRIO_BIT_SHIFT(irq)));
+#else
 	__scs.nvic.ipr[irq] = prio;
+#endif /* CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 
 /**
@@ -199,11 +221,16 @@ static inline void _NvicIrqPrioSet(unsigned int irq, unsigned int prio)
  * @return the priority level of the IRQ
  */
 
-static inline uint32_t _NvicIrqPrioGet(unsigned int irq)
+static inline uint8_t _NvicIrqPrioGet(unsigned int irq)
 {
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	return (__scs.nvic.ipr[_PRIO_IP_IDX(irq)] >> _PRIO_BIT_SHIFT(irq));
+#else
 	return __scs.nvic.ipr[irq];
+#endif /* CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 /**
  *
  * @brief Trigger an interrupt via software
@@ -224,6 +251,7 @@ static inline void _NvicSwInterruptTrigger(unsigned int irq)
 	__scs.stir = irq;
 #endif
 }
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
 
 #endif /* !_ASMLANGUAGE */
 

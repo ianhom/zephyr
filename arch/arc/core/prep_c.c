@@ -30,9 +30,12 @@
 #include <toolchain.h>
 #include <linker-defs.h>
 #include <arch/arc/v2/aux_regs.h>
+#include <kernel_structs.h>
 #include <nano_internal.h>
 
 
+/* XXX - keep for future use in full-featured cache APIs */
+#if 0
 /**
  *
  * @brief Disable the i-cache if present
@@ -78,7 +81,7 @@ static void invalidate_dcache(void)
 	}
 	_arc_v2_aux_reg_write(_ARC_V2_DC_IVDC, 1);
 }
-
+#endif
 
 /**
  *
@@ -120,8 +123,6 @@ extern FUNC_NORETURN void _Cstart(void);
 
 void _PrepC(void)
 {
-	disable_icache();
-	invalidate_dcache();
 	adjust_vector_table_base();
 	_bss_zero();
 	_data_copy();

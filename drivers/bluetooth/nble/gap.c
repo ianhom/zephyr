@@ -17,7 +17,7 @@
 #include <errno.h>
 #include <atomic.h>
 
-#include <nanokernel.h>
+#include <zephyr.h>
 #include <device.h>
 
 #include <net/buf.h>
@@ -389,7 +389,7 @@ void bt_storage_register(const struct bt_storage *bt_storage)
 	storage = bt_storage;
 }
 
-int bt_storage_clear(bt_addr_le_t *addr)
+int bt_storage_clear(const bt_addr_le_t *addr)
 {
 	clear_bonds(addr);
 	/* FIXME: make the necessary storage callbacks too. */

@@ -134,7 +134,7 @@ config ARCV2_TIMER_IRQ_PRIORITY
 config CORTEX_M_SYSTICK
 	bool "Cortex-M SYSTICK timer"
 	default y
-	depends on CPU_CORTEX_M
+	depends on CPU_HAS_SYSTICK
 	help
 	This module implements a kernel device driver for the Cortex-M processor
 	SYSTICK timer and provides the standard "system clock driver" interfaces.
@@ -148,6 +148,16 @@ config ALTERA_AVALON_TIMER
 	Interval Timer as described in the Embedded IP documentation, for use
 	with Nios II and possibly other Altera soft CPUs. It provides the
 	standard "system clock driver" interfaces.
+
+config NRF_RTC_TIMER
+	bool "nRF Real Time Counter (NRF_RTC1) Timer"
+	default y
+	depends on SOC_FAMILY_NRF5
+	select TICKLESS_IDLE_SUPPORTED
+	help
+	This module implements a kernel device driver for the nRF Real Time
+	Counter NRF_RTC1 and provides the standard "system clock driver"
+	interfaces.
 
 config SYSTEM_CLOCK_DISABLE
 	bool "API to disable system clock"
@@ -169,7 +179,7 @@ config SYSTEM_CLOCK_INIT_PRIORITY
 	default 0
 	help
 	This options can be used to set a specific initialization priority
-	value for the system clock driver. As drivers on nanokernel
-	initialization level might need the clock to be running already, you
-	should let the default value as it is (0).
+	value for the system clock driver. As driver initialization  might need
+	the clock to be running already, you should let the default value as it
+	is (0).
 endmenu

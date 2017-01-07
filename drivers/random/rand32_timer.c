@@ -26,7 +26,7 @@
 
 #include <drivers/rand32.h>
 #include <drivers/system_timer.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <atomic.h>
 
 #if defined(__GNUC__)
@@ -38,22 +38,6 @@
 static atomic_val_t _rand32_counter;
 
 #define _RAND32_INC 1000000013
-
-/**
- *
- * @brief Initialize the random number generator
- *
- * The non-random number generator does not require any initialization.
- * This routine is automatically invoked by the kernel during system
- * initialization.
- *
- * @return N/A
- */
-
-
-void sys_rand32_init(void)
-{
-}
 
 /**
  *

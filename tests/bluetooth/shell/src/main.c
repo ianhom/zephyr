@@ -37,8 +37,9 @@
 #include <bluetooth/l2cap.h>
 #include <bluetooth/rfcomm.h>
 #include <bluetooth/storage.h>
+#include <bluetooth/sdp.h>
 
-#include <misc/shell.h>
+#include <shell/shell.h>
 
 #include <gatt/gap.h>
 #include <gatt/hrs.h>
@@ -49,22 +50,90 @@
 #define DATA_MTU		(23 * CREDITS)
 #define DATA_BREDR_MTU		48
 
+#define MY_SHELL_MODULE "btshell"
 static struct bt_conn *default_conn;
 static bt_addr_le_t id_addr;
 
 /* Connection context for BR/EDR legacy pairing in sec mode 3 */
 static struct bt_conn *pairing_conn;
 
-static struct nano_fifo data_fifo;
-static NET_BUF_POOL(data_pool, 1, DATA_MTU, &data_fifo, NULL,
-		    BT_BUF_USER_DATA_MIN);
+#if defined(CONFIG_BLUETOOTH_L2CAP_DYNAMIC_CHANNEL)
+NET_BUF_POOL_DEFINE(data_pool, 1, DATA_MTU, BT_BUF_USER_DATA_MIN, NULL);
+#endif
 
 #if defined(CONFIG_BLUETOOTH_BREDR)
-static struct nano_fifo data_bredr_fifo;
-static NET_BUF_POOL(data_bredr_pool, 1, DATA_BREDR_MTU, &data_bredr_fifo, NULL,
-		    BT_BUF_USER_DATA_MIN);
+NET_BUF_POOL_DEFINE(data_bredr_pool, 1, DATA_BREDR_MTU, BT_BUF_USER_DATA_MIN,
+		    NULL);
 
 #endif /* CONFIG_BLUETOOTH_BREDR */
+
+#if defined(CONFIG_BLUETOOTH_RFCOMM)
+
+static struct bt_sdp_attribute spp_attrs[] = {
+	BT_SDP_NEW_SERVICE,
+	BT_SDP_LIST(
+		BT_SDP_ATTR_SVCLASS_ID_LIST,
+		BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 3),
+		BT_SDP_DATA_ELEM_LIST(
+		{
+			BT_SDP_TYPE_SIZE(BT_SDP_UUID16),
+			BT_SDP_ARRAY_16(BT_SDP_SERIAL_PORT_SVCLASS)
+		},
+		)
+	),
+	BT_SDP_LIST(
+		BT_SDP_ATTR_PROTO_DESC_LIST,
+		BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 12),
+		BT_SDP_DATA_ELEM_LIST(
+		{
+			BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 3),
+			BT_SDP_DATA_ELEM_LIST(
+			{
+				BT_SDP_TYPE_SIZE(BT_SDP_UUID16),
+				BT_SDP_ARRAY_16(BT_UUID_L2CAP_VAL)
+			},
+			)
+		},
+		{
+			BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 5),
+			BT_SDP_DATA_ELEM_LIST(
+			{
+				BT_SDP_TYPE_SIZE(BT_SDP_UUID16),
+				BT_SDP_ARRAY_16(BT_UUID_RFCOMM_VAL)
+			},
+			{
+				BT_SDP_TYPE_SIZE(BT_SDP_UINT8),
+				BT_SDP_ARRAY_8(BT_RFCOMM_CHAN_SPP)
+			},
+			)
+		},
+		)
+	),
+	BT_SDP_LIST(
+		BT_SDP_ATTR_PROFILE_DESC_LIST,
+		BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 8),
+		BT_SDP_DATA_ELEM_LIST(
+		{
+			BT_SDP_TYPE_SIZE(BT_SDP_SEQ8, 6),
+			BT_SDP_DATA_ELEM_LIST(
+			{
+				BT_SDP_TYPE_SIZE(BT_SDP_UUID16),
+				BT_SDP_ARRAY_16(BT_SDP_SERIAL_PORT_SVCLASS)
+			},
+			{
+				BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+				BT_SDP_ARRAY_16(0x0102)
+			},
+			)
+		},
+		)
+	),
+	BT_SDP_SERVICE_NAME("Serial Port"),
+};
+
+static struct bt_sdp_record spp_rec = BT_SDP_RECORD(spp_attrs);
+
+#endif /* CONFIG_BLUETOOTH_RFCOMM */
 
 static const char *current_prompt(void)
 {
@@ -1246,7 +1315,7 @@ static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	snprintf(passkey_str, 7, "%06u", passkey);
+	snprintk(passkey_str, 7, "%06u", passkey);
 
 	printk("Passkey for %s: %s\n", addr, passkey_str);
 }
@@ -1258,7 +1327,7 @@ static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	snprintf(passkey_str, 7, "%06u", passkey);
+	snprintk(passkey_str, 7, "%06u", passkey);
 
 	printk("Confirm passkey for %s: %s\n", addr, passkey_str);
 }
@@ -1635,10 +1704,13 @@ static int cmd_bredr_discovery(int argc, char *argv[])
 		struct bt_br_discovery_param param;
 
 		param.limited = false;
-		/* FIXME: expose providing length on the command line */
 		param.length = 8;
 
-		if (argc > 2 && !strcmp(argv[2], "limited")) {
+		if (argc > 2) {
+			param.length = atoi(argv[2]);
+		}
+
+		if (argc > 3 && !strcmp(argv[3], "limited")) {
 			param.limited = true;
 		}
 
@@ -1665,6 +1737,54 @@ static int cmd_bredr_discovery(int argc, char *argv[])
 }
 
 #endif /* CONFIG_BLUETOOTH_BREDR */
+
+static int cmd_clear(int argc, char *argv[])
+{
+	bt_addr_le_t addr;
+	int err;
+
+	if (argc < 2) {
+		printk("Specify remote address or \"all\"\n");
+		return 0;
+	}
+
+	if (strcmp(argv[1], "all") == 0) {
+		err = bt_storage_clear(NULL);
+		if (err) {
+			printk("Failed to clear storage (err %d)\n", err);
+		} else {
+			printk("Storage successfully cleared\n");
+		}
+
+		return 0;
+	}
+
+	if (argc < 3) {
+#if defined(CONFIG_BLUETOOTH_BREDR)
+		addr.type = BT_ADDR_LE_PUBLIC;
+		err = str2bt_addr(argv[1], &addr.a);
+#else
+		printk("Both address and address type needed\n");
+		return 0;
+#endif
+	} else {
+		err = str2bt_addr_le(argv[1], argv[2], &addr);
+	}
+
+	if (err) {
+		printk("Invalid address\n");
+		return 0;
+	}
+
+	err = bt_storage_clear(&addr);
+	if (err) {
+		printk("Failed to clear storage (err %d)\n", err);
+	} else {
+		printk("Storage successfully cleared\n");
+	}
+
+	return 0;
+}
 
 #if defined(CONFIG_BLUETOOTH_L2CAP_DYNAMIC_CHANNEL)
 static void l2cap_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
@@ -1694,7 +1814,7 @@ static struct net_buf *l2cap_alloc_buf(struct bt_l2cap_chan *chan)
 {
 	printk("Channel %p requires buffer\n", chan);
 
-	return net_buf_get(&data_fifo, 0);
+	return net_buf_alloc(&data_pool, K_FOREVER);
 }
 
 static struct bt_l2cap_chan_ops l2cap_ops = {
@@ -1740,11 +1860,16 @@ static int cmd_l2cap_register(int argc, char *argv[])
 
 	server.psm = strtoul(argv[1], NULL, 16);
 
+	if (argc > 2) {
+		server.sec_level = strtoul(argv[2], NULL, 10);
+	}
+
 	if (bt_l2cap_server_register(&server) < 0) {
 		printk("Unable to register psm\n");
 		server.psm = 0;
 	} else {
-		printk("L2CAP psm %u registered\n", server.psm);
+		printk("L2CAP psm %u sec_level %u registered\n", server.psm,
+		       server.sec_level);
 	}
 
 	return 0;
@@ -1801,11 +1926,10 @@ static int cmd_l2cap_send(int argc, char *argv[])
 	len = min(l2cap_chan.tx.mtu, DATA_MTU - BT_L2CAP_CHAN_SEND_RESERVE);
 
 	while (count--) {
-		buf = net_buf_get_timeout(&data_fifo,
-					  BT_L2CAP_CHAN_SEND_RESERVE,
-					  TICKS_UNLIMITED);
+		buf = net_buf_alloc(&data_pool, K_FOREVER);
+		net_buf_reserve(buf, BT_L2CAP_CHAN_SEND_RESERVE);
 
-		memcpy(net_buf_add(buf, len), buf_data, len);
+		net_buf_add_mem(buf, buf_data, len);
 		ret = bt_l2cap_chan_send(&l2cap_chan.chan, buf);
 		if (ret < 0) {
 			printk("Unable to send: %d\n", -ret);
@@ -1838,7 +1962,7 @@ static struct net_buf *l2cap_bredr_alloc_buf(struct bt_l2cap_chan *chan)
 {
 	printk("Channel %p requires buffer\n", chan);
 
-	return net_buf_get(&data_bredr_fifo, 0);
+	return net_buf_alloc(&data_bredr_pool, K_FOREVER);
 }
 
 static struct bt_l2cap_chan_ops l2cap_bredr_ops = {
@@ -1944,16 +2068,12 @@ static int cmd_bredr_rfcomm_register(int argc, char *argv[])
 {
 	int ret;
 
-	if (argc < 2) {
-		return -EINVAL;
-	}
-
 	if (rfcomm_server.channel) {
 		printk("Already registered\n");
 		return 0;
 	}
 
-	rfcomm_server.channel = strtoul(argv[1], NULL, 16);
+	rfcomm_server.channel = BT_RFCOMM_CHAN_SPP;
 
 	ret = bt_rfcomm_server_register(&rfcomm_server);
 	if (ret < 0) {
@@ -1961,6 +2081,34 @@ static int cmd_bredr_rfcomm_register(int argc, char *argv[])
 		rfcomm_server.channel = 0;
 	} else {
 		printk("RFCOMM channel %u registered\n", rfcomm_server.channel);
+		bt_sdp_register_service(&spp_rec);
+	}
+
+	return 0;
+}
+
+static int cmd_rfcomm_connect(int argc, char *argv[])
+{
+	uint8_t channel;
+	int err;
+
+	if (!default_conn) {
+		printk("Not connected\n");
+		return 0;
+	}
+
+	if (argc < 2) {
+		return -EINVAL;
+	}
+
+	channel = strtoul(argv[1], NULL, 16);
+
+	err = bt_rfcomm_dlc_connect(default_conn, &rfcomm_dlc, channel);
+	if (err < 0) {
+		printk("Unable to connect to channel %d (err %u)\n",
+		       channel, err);
+	} else {
+		printk("RFCOMM connection pending\n");
 	}
 
 	return 0;
@@ -1978,17 +2126,29 @@ static int cmd_rfcomm_send(int argc, char *argv[])
 	}
 
 	while (count--) {
-		buf = bt_rfcomm_create_pdu(&data_bredr_fifo);
+		buf = bt_rfcomm_create_pdu(&data_bredr_pool);
 		/* Should reserve one byte in tail for FCS */
 		len = min(rfcomm_dlc.mtu, net_buf_tailroom(buf) - 1);
 
-		memcpy(net_buf_add(buf, len), buf_data, len);
+		net_buf_add_mem(buf, buf_data, len);
 		ret = bt_rfcomm_dlc_send(&rfcomm_dlc, buf);
 		if (ret < 0) {
 			printk("Unable to send: %d\n", -ret);
 			net_buf_unref(buf);
 			break;
 		}
+	}
+
+	return 0;
+}
+
+static int cmd_rfcomm_disconnect(int argc, char *argv[])
+{
+	int err;
+
+	err = bt_rfcomm_dlc_disconnect(&rfcomm_dlc);
+	if (err) {
+		printk("Unable to disconnect: %u\n", -err);
 	}
 
 	return 0;
@@ -2086,6 +2246,7 @@ static const struct shell_cmd commands[] = {
 	{ "advertise", cmd_advertise,
 	"<type: off, on, scan, nconn> <mode: discov, non_discov>"  },
 	{ "oob", cmd_oob },
+	{ "clear", cmd_clear },
 #if defined(CONFIG_BLUETOOTH_SMP) || defined(CONFIG_BLUETOOTH_BREDR)
 	{ "security", cmd_security, "<security level: 0, 1, 2, 3>" },
 	{ "auth", cmd_auth,
@@ -2123,7 +2284,7 @@ static const struct shell_cmd commands[] = {
 	{ "hrs-simulate", cmd_hrs_simulate,
 	  "register and simulate Heart Rate Service <value: on, off>" },
 #if defined(CONFIG_BLUETOOTH_L2CAP_DYNAMIC_CHANNEL)
-	{ "l2cap-register", cmd_l2cap_register, "<psm>" },
+	{ "l2cap-register", cmd_l2cap_register, "<psm> [sec_level]" },
 	{ "l2cap-connect", cmd_l2cap_connect, "<psm>" },
 	{ "l2cap-disconnect", cmd_l2cap_disconnect, HELP_NONE },
 	{ "l2cap-send", cmd_l2cap_send, "<number of packets>" },
@@ -2133,12 +2294,14 @@ static const struct shell_cmd commands[] = {
 	{ "br-pscan", cmd_bredr_connectable, "value: on, off" },
 	{ "br-connect", cmd_connect_bredr, "<address>" },
 	{ "br-discovery", cmd_bredr_discovery,
-	  "<value: on, off> [mode: limited]"  },
+	  "<value: on, off> [length: 1-48] [mode: limited]"  },
 	{ "br-l2cap-register", cmd_bredr_l2cap_register, "<psm>" },
 	{ "br-oob", cmd_bredr_oob },
 #if defined(CONFIG_BLUETOOTH_RFCOMM)
-	{ "br-rfcomm-register", cmd_bredr_rfcomm_register, "<channel>" },
+	{ "br-rfcomm-register", cmd_bredr_rfcomm_register },
+	{ "br-rfcomm-connect", cmd_rfcomm_connect, "<channel>" },
 	{ "br-rfcomm-send", cmd_rfcomm_send, "<number of packets>"},
+	{ "br-rfcomm-disconnect", cmd_rfcomm_disconnect, HELP_NONE },
 #endif /* CONFIG_BLUETOOTH_RFCOMM */
 #endif
 	{ NULL, NULL }
@@ -2148,20 +2311,15 @@ void main(void)
 {
 	bt_conn_cb_register(&conn_callbacks);
 
-	net_buf_pool_init(data_pool);
-#if defined(CONFIG_BLUETOOTH_BREDR)
-	net_buf_pool_init(data_bredr_pool);
-#endif /* CONFIG_BLUETOOTH_BREDR */
-
 	printk("Type \"help\" for supported commands.\n");
 	printk("Before any Bluetooth commands you must run \"init\".\n");
 
-	shell_init("btshell> ", commands);
-
+	SHELL_REGISTER(MY_SHELL_MODULE, commands);
 	shell_register_prompt_handler(current_prompt);
+	shell_register_default_module(MY_SHELL_MODULE);
 
 	while (1) {
-		task_sleep(sys_clock_ticks_per_sec);
+		k_sleep(MSEC_PER_SEC);
 
 		/* Heartrate measurements simulation */
 		if (hrs_simulate) {

@@ -37,7 +37,7 @@ struct i2c_ksdk_config {
 
 struct i2c_ksdk_data {
 	i2c_master_handle_t handle;
-	device_sync_call_t sync;
+	struct k_sem device_sync_sem;
 	status_t callback_status;
 };
 
@@ -84,8 +84,11 @@ static void i2c_ksdk_master_transfer_callback(I2C_Type *base,
 	struct device *dev = userData;
 	struct i2c_ksdk_data *data = DEV_DATA(dev);
 
+	ARG_UNUSED(handle);
+	ARG_UNUSED(base);
+
 	data->callback_status = status;
-	device_sync_call_complete(&data->sync);
+	k_sem_give(&data->device_sync_sem);
 }
 
 static uint32_t i2c_ksdk_convert_flags(int msg_flags)
@@ -136,7 +139,7 @@ static int i2c_ksdk_transfer(struct device *dev, struct i2c_msg *msgs,
 		}
 
 		/* Wait for the transfer to complete */
-		device_sync_call_wait(&data->sync);
+		k_sem_take(&data->device_sync_sem, K_FOREVER);
 
 		/* Return an error if the transfer didn't complete
 		 * successfully. e.g., nak, timeout, lost arbitration
@@ -170,7 +173,7 @@ static int i2c_ksdk_init(struct device *dev)
 	i2c_master_config_t master_config;
 	int error;
 
-	device_sync_call_init(&data->sync);
+	k_sem_init(&data->device_sync_sem, 0, UINT_MAX);
 
 	clock_freq = CLOCK_GetFreq(config->clock_source);
 	I2C_MasterGetDefaultConfig(&master_config);
@@ -188,7 +191,7 @@ static int i2c_ksdk_init(struct device *dev)
 	return 0;
 }
 
-static struct i2c_driver_api i2c_ksdk_driver_api = {
+static const struct i2c_driver_api i2c_ksdk_driver_api = {
 	.configure = i2c_ksdk_configure,
 	.transfer = i2c_ksdk_transfer,
 };
@@ -196,7 +199,7 @@ static struct i2c_driver_api i2c_ksdk_driver_api = {
 #ifdef CONFIG_I2C_0
 static void i2c_ksdk_config_func_0(struct device *dev);
 
-static struct i2c_ksdk_config i2c_ksdk_config_0 = {
+static const struct i2c_ksdk_config i2c_ksdk_config_0 = {
 	.base = I2C0,
 	.clock_source = I2C0_CLK_SRC,
 	.irq_config_func = i2c_ksdk_config_func_0,
@@ -207,11 +210,13 @@ static struct i2c_ksdk_data i2c_ksdk_data_0;
 
 DEVICE_AND_API_INIT(i2c_ksdk_0, CONFIG_I2C_0_NAME, &i2c_ksdk_init,
 		    &i2c_ksdk_data_0, &i2c_ksdk_config_0,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &i2c_ksdk_driver_api);
 
 static void i2c_ksdk_config_func_0(struct device *dev)
 {
+	ARG_UNUSED(dev);
+
 	IRQ_CONNECT(IRQ_I2C0, CONFIG_I2C_0_IRQ_PRI,
 		    i2c_ksdk_isr, DEVICE_GET(i2c_ksdk_0), 0);
 
@@ -222,7 +227,7 @@ static void i2c_ksdk_config_func_0(struct device *dev)
 #ifdef CONFIG_I2C_1
 static void i2c_ksdk_config_func_1(struct device *dev);
 
-static struct i2c_ksdk_config i2c_ksdk_config_1 = {
+static const struct i2c_ksdk_config i2c_ksdk_config_1 = {
 	.base = I2C1,
 	.clock_source = I2C1_CLK_SRC,
 	.irq_config_func = i2c_ksdk_config_func_1,
@@ -233,7 +238,7 @@ static struct i2c_ksdk_data i2c_ksdk_data_1;
 
 DEVICE_AND_API_INIT(i2c_ksdk_1, CONFIG_I2C_1_NAME, &i2c_ksdk_init,
 		    &i2c_ksdk_data_1, &i2c_ksdk_config_1,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &i2c_ksdk_driver_api);
 
 static void i2c_ksdk_config_func_1(struct device *dev)

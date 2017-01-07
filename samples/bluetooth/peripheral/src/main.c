@@ -84,7 +84,7 @@ static uint8_t simulate_vnd;
 static uint8_t indicating;
 static struct bt_gatt_indicate_params ind_params;
 
-static void vnd_ccc_cfg_changed(uint16_t value)
+static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
 	simulate_vnd = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
 }
@@ -304,7 +304,7 @@ void main(void)
 	 * of starting delayed work so we do it here
 	 */
 	while (1) {
-		task_sleep(sys_clock_ticks_per_sec);
+		k_sleep(MSEC_PER_SEC);
 
 		/* Current Time Service updates only when time is changed */
 		cts_notify();

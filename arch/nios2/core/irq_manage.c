@@ -21,13 +21,13 @@
  */
 
 
-#include <nanokernel.h>
-#include <nano_private.h>
+#include <kernel.h>
+#include <kernel_structs.h>
 #include <arch/cpu.h>
 #include <irq.h>
 #include <misc/printk.h>
 #include <sw_isr_table.h>
-#include <misc/kernel_event_logger.h>
+#include <logging/kernel_event_logger.h>
 
 void _irq_spurious(void *unused)
 {
@@ -80,6 +80,8 @@ void _enter_irq(uint32_t ipending)
 {
 	int index;
 
+	_kernel.nested++;
+
 #ifdef CONFIG_IRQ_OFFLOAD
 	_irq_do_offload();
 #endif
@@ -97,5 +99,7 @@ void _enter_irq(uint32_t ipending)
 		ite = &_sw_isr_table[index];
 		ite->isr(ite->arg);
 	}
+
+	_kernel.nested--;
 }
 

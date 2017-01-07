@@ -16,7 +16,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <shared_irq.h>
 #include <init.h>
@@ -118,7 +118,7 @@ void shared_irq_isr(struct device *dev)
 	}
 }
 
-static struct shared_irq_driver_api api_funcs = {
+static const struct shared_irq_driver_api api_funcs = {
 	.isr_register = isr_register,
 	.enable = enable,
 	.disable = disable,
@@ -138,7 +138,7 @@ int shared_irq_initialize(struct device *dev)
 #if CONFIG_SHARED_IRQ_0
 void shared_irq_config_0_irq(void);
 
-struct shared_irq_config shared_irq_config_0 = {
+const struct shared_irq_config shared_irq_config_0 = {
 	.irq_num = CONFIG_SHARED_IRQ_0_IRQ,
 	.client_count = CONFIG_SHARED_IRQ_NUM_CLIENTS,
 	.config = shared_irq_config_0_irq
@@ -148,7 +148,7 @@ struct shared_irq_runtime shared_irq_0_runtime;
 
 DEVICE_INIT(shared_irq_0, CONFIG_SHARED_IRQ_0_NAME, shared_irq_initialize,
 				&shared_irq_0_runtime, &shared_irq_config_0,
-				SECONDARY, CONFIG_SHARED_IRQ_INIT_PRIORITY);
+				POST_KERNEL, CONFIG_SHARED_IRQ_INIT_PRIORITY);
 
 #if defined(CONFIG_IOAPIC)
 #if defined(CONFIG_SHARED_IRQ_0_FALLING_EDGE)
@@ -176,7 +176,7 @@ void shared_irq_config_0_irq(void)
 #if CONFIG_SHARED_IRQ_1
 void shared_irq_config_1_irq(void);
 
-struct shared_irq_config shared_irq_config_1 = {
+const struct shared_irq_config shared_irq_config_1 = {
 	.irq_num = CONFIG_SHARED_IRQ_1_IRQ,
 	.client_count = CONFIG_SHARED_IRQ_NUM_CLIENTS,
 	.config = shared_irq_config_1_irq
@@ -186,7 +186,7 @@ struct shared_irq_runtime shared_irq_1_runtime;
 
 DEVICE_INIT(shared_irq_1, CONFIG_SHARED_IRQ_1_NAME, shared_irq_initialize,
 				&shared_irq_1_runtime, &shared_irq_config_1,
-				SECONDARY, CONFIG_SHARED_IRQ_INIT_PRIORITY);
+				POST_KERNEL, CONFIG_SHARED_IRQ_INIT_PRIORITY);
 
 #if defined(CONFIG_IOAPIC)
 #if defined(CONFIG_SHARED_IRQ_1_FALLING_EDGE)

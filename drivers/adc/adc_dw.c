@@ -19,7 +19,7 @@
 #include <errno.h>
 
 #include <init.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <string.h>
 #include <stdlib.h>
 #include <board.h>
@@ -291,7 +291,7 @@ static int adc_dw_read_request(struct device *dev, struct adc_seq_table *seq_tbl
 	info->state = ADC_STATE_SAMPLING;
 	sys_out32(START_ADC_SEQ, adc_base + ADC_CTRL);
 
-	device_sync_call_wait(&info->sync);
+	k_sem_take(&info->device_sync_sem, K_FOREVER);
 
 	if (info->state == ADC_STATE_ERROR) {
 		info->state = ADC_STATE_IDLE;
@@ -348,7 +348,7 @@ int adc_dw_init(struct device *dev)
 
 	config->config_func();
 
-	device_sync_call_init(&info->sync);
+	k_sem_init(&info->device_sync_sem, 0, UINT_MAX);
 
 	int_unmask(config->reg_irq_mask);
 	int_unmask(config->reg_err_mask);
@@ -357,7 +357,7 @@ int adc_dw_init(struct device *dev)
 }
 
 #ifdef CONFIG_ADC_DW_SINGLESHOT
-void adc_dw_rx_isr(void *arg)
+static void adc_dw_rx_isr(void *arg)
 {
 	struct device *dev = (struct device *)arg;
 	struct device_config *dev_config = dev->config;
@@ -387,10 +387,10 @@ void adc_dw_rx_isr(void *arg)
 	reg_val = sys_in32(adc_base + ADC_CTRL);
 	sys_out32(reg_val | ADC_CLR_DATA_A, adc_base + ADC_CTRL);
 
-	device_sync_call_complete(&info->sync);
+	k_sem_give(&info->device_sync_sem);
 }
 #else /*CONFIG_ADC_DW_REPETITIVE*/
-void adc_dw_rx_isr(void *arg)
+static void adc_dw_rx_isr(void *arg)
 {
 	struct device *dev = (struct device *)arg;
 	struct device_config *dev_config = dev->config;
@@ -431,7 +431,7 @@ void adc_dw_rx_isr(void *arg)
 		reg_val = sys_in32(adc_base + ADC_CTRL);
 		sys_out32(reg_val | ADC_CLR_DATA_A, adc_base + ADC_CTRL);
 
-		device_sync_call_complete(&info->sync);
+		k_sem_give(&info->device_sync_sem);
 		return;
 	}
 
@@ -442,7 +442,7 @@ void adc_dw_rx_isr(void *arg)
 #endif
 
 
-void adc_dw_err_isr(void *arg)
+static void adc_dw_err_isr(void *arg)
 {
 	struct device *dev = (struct device *) arg;
 	const struct adc_config  *config = dev->config->config_info;
@@ -457,7 +457,7 @@ void adc_dw_err_isr(void *arg)
 
 	info->state = ADC_STATE_ERROR;
 
-	device_sync_call_complete(&info->sync);
+	k_sem_give(&info->device_sync_sem);
 }
 
 #ifdef CONFIG_ADC_DW
@@ -499,7 +499,7 @@ static struct adc_config adc_config_dev = {
 
 DEVICE_AND_API_INIT(adc_dw, CONFIG_ADC_0_NAME, &adc_dw_init,
 		    &adc_info_dev, &adc_config_dev,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		    &api_funcs);
 
 static void adc_config_irq(void)

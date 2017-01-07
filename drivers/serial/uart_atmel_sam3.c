@@ -28,7 +28,7 @@
  * (used uart_stellaris.c as template)
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/__assert.h>
 #include <board.h>
@@ -124,7 +124,7 @@ struct uart_sam3_dev_data_t {
 #define UART_PDC_PTCR_RXTDIS	(1 << 1)
 #define UART_PDC_PTCR_TXTDIS	(1 << 9)
 
-static struct uart_driver_api uart_sam3_driver_api;
+static const struct uart_driver_api uart_sam3_driver_api;
 
 /**
  * @brief Set the baud rate
@@ -144,6 +144,8 @@ static void baudrate_set(struct device *dev,
 	const struct uart_device_config * const dev_cfg = DEV_CFG(dev);
 	struct uart_sam3_dev_data_t * const dev_data = DEV_DATA(dev);
 	uint32_t divisor; /* baud rate divisor */
+
+	ARG_UNUSED(sys_clk_freq_hz);
 
 	if ((baudrate != 0) && (dev_cfg->sys_clk_freq != 0)) {
 		/* calculate baud rate divisor */
@@ -209,7 +211,7 @@ static int uart_sam3_poll_in(struct device *dev, unsigned char *c)
 {
 	volatile struct _uart *uart = UART_STRUCT(dev);
 
-	if (uart->sr & UART_INT_RXRDY)
+	if (!(uart->sr & UART_INT_RXRDY))
 		return (-1);
 
 	/* got a character */
@@ -243,12 +245,12 @@ static unsigned char uart_sam3_poll_out(struct device *dev,
 	return c;
 }
 
-static struct uart_driver_api uart_sam3_driver_api = {
+static const struct uart_driver_api uart_sam3_driver_api = {
 	.poll_in = uart_sam3_poll_in,
 	.poll_out = uart_sam3_poll_out,
 };
 
-static struct uart_device_config uart_sam3_dev_cfg_0 = {
+static const struct uart_device_config uart_sam3_dev_cfg_0 = {
 	.base = (uint8_t *)UART_ADDR,
 	.sys_clk_freq = CONFIG_UART_ATMEL_SAM3_CLK_FREQ,
 };
@@ -259,5 +261,5 @@ static struct uart_sam3_dev_data_t uart_sam3_dev_data_0 = {
 
 DEVICE_AND_API_INIT(uart_sam3_0, CONFIG_UART_ATMEL_SAM3_NAME, &uart_sam3_init,
 		    &uart_sam3_dev_data_0, &uart_sam3_dev_cfg_0,
-		    PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &uart_sam3_driver_api);

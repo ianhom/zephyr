@@ -45,7 +45,7 @@ extern "C" {
 
 #ifdef _ASMLANGUAGE
 
-/* needed by nano_cpu_atomic_idle() written in asm */
+/* needed by k_cpu_atomic_idle() written in asm */
 #define _SCB_SCR 0xE000ED10
 
 #define _SCB_SCR_SEVONPEND (1 << 4)
@@ -54,7 +54,7 @@ extern "C" {
 
 #else
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/__assert.h>
 #include <arch/arm/cortex_m/scs.h>
@@ -209,21 +209,6 @@ static inline int _ScbHiPriVectorPendingGet(void)
 
 /**
  *
- * @brief Find out if the currently executing exception is nested
- *
- * This routine determines if the currently executing exception is nested.
- *
- * @return 1 if nested, 0 otherwise
- */
-
-static inline int _ScbIsNestedExc(void)
-{
-	/* !bit == preempted exceptions */
-	return !__scs.scb.icsr.bit.rettobase;
-}
-
-/**
- *
  * @brief Find out if running in thread mode
  *
  * This routine determines if the current mode is thread mode.
@@ -282,76 +267,6 @@ static inline uint32_t _ScbActiveVectorGet(void)
 
 /**
  *
- * @brief Find out if vector table is in SRAM or ROM
- *
- * This routine determines if the currently executing exception is nested.
- *
- * @return 1 if in SRAM, 0 if in ROM
- */
-
-static inline uint32_t _ScbIsVtableInSram(void)
-{
-	return !!__scs.scb.vtor.bit.tblbase;
-}
-
-/**
- *
- * @brief Move vector table from SRAM to ROM and vice-versa
- *
- * This routine moves the vector table to the given memory region.
- *
- * @return 1 if in SRAM, 0 if in ROM
- */
-
-static inline void _ScbVtableLocationSet(
-	int sram /* 1 to move vector to SRAM, 0 to move it to ROM */
-	)
-{
-	__ASSERT(!(sram & 0xfffffffe), "");
-	__scs.scb.vtor.bit.tblbase = sram;
-}
-
-/**
- *
- * @brief Obtain base address of vector table
- *
- * This routine returns the vector table's base address.
- *
- * @return the base address of the vector table
- */
-
-static inline uint32_t _ScbVtableAddrGet(void)
-{
-	return __scs.scb.vtor.bit.tbloff;
-}
-
-/**
- *
- * @brief Set base address of vector table
- *
- * @a addr must align to the number of exception entries in vector table:
- *
- *    numException = 16 + num_interrupts where each entry is 4 Bytes
- *
- * As a minimum, @a addr must be a multiple of 128:
- *
- *  0 <= num_interrupts <  16: multiple 0x080
- * 16 <= num_interrupts <  48: multiple 0x100
- * 48 <= num_interrupts < 112: multiple 0x200
- *               ....
- * @param addr base address, aligned on 128 minimum
- *
- * @return N/A
- */
-
-static inline void _ScbVtableAddrSet(uint32_t addr)
-{
-	__ASSERT(!(addr & 0x7F), "invalid vtable base Addr");
-	__scs.scb.vtor.bit.tbloff = addr;
-}
-
-/**
- *
  * @brief Find out if data regions are little endian
  *
  * Data regions on Cortex-M devices can be either little or big endian. Code
@@ -363,22 +278,6 @@ static inline void _ScbVtableAddrSet(uint32_t addr)
 static inline int _ScbIsDataLittleEndian(void)
 {
 	return !(__scs.scb.aircr.bit.endianness);
-}
-
-/**
- *
- * @brief Get the programmed number of priority groups
- *
- * Exception priorities can be sub-divided into groups, with sub-priorities.
- * Within these groups, exceptions do not preempt each other. The sub-priorities
- * are only used to decide which exception will run when several are pending.
- *
- * @return the number of priority groups
- */
-
-static inline int _ScbNumPriGroupGet(void)
-{
-	return 1 << (7 - __scs.scb.aircr.bit.prigroup);
 }
 
 /**
@@ -480,36 +379,6 @@ static inline void _ScbSleepDeepClear(void)
 
 /**
  *
- * @brief Enable faulting on division by zero
- *
- * This routine enables the divide by zero fault.
- * By default, the CPU ignores the error.
- *
- * @return N/A
- */
-
-static inline void _ScbDivByZeroFaultEnable(void)
-{
-	__scs.scb.ccr.bit.div_0_trp = 1;
-}
-
-/**
- *
- * @brief Ignore division by zero errors
- *
- * This routine disables the divide by zero fault.
- * This is the default behavior.
- *
- * @return N/A
- */
-
-static inline void _ScbDivByZeroFaultDisable(void)
-{
-	__scs.scb.ccr.bit.div_0_trp = 0;
-}
-
-/**
- *
  * @brief Enable faulting on unaligned access
  *
  * This routine enables the unaligned access fault.
@@ -557,10 +426,12 @@ static inline void ScbCcrSet(uint32_t val)
  *
  * @brief Obtain priority of an exception
  *
- * Only works with exceptions 4 to 15; i.e. do not use this for interrupts, which
+ * Only works with exceptions; i.e. do not use this for interrupts, which
  * are exceptions 16+.
  *
- * Exceptions 1 to 3 priorities are fixed (-3, -2, -1).
+ * ARMv6-M: Exceptions 1 to 3 priorities are fixed (-3, -2, -1) and 4 to 9 are
+ * reserved exceptions.
+ * ARMv7-M: Exceptions 1 to 3 priorities are fixed (-3, -2, -1).
  *
  * @param exc exception number, 4 to 15
  * @return priority of exception @a exc
@@ -568,33 +439,179 @@ static inline void ScbCcrSet(uint32_t val)
 
 static inline uint8_t _ScbExcPrioGet(uint8_t exc)
 {
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	__ASSERT((exc > 10) && (exc < 16), "");
+	return (__scs.scb.shpr[_PRIO_SHP_IDX(exc)] >> _PRIO_BIT_SHIFT(exc));
+#else
 	/* For priority exception handler 4-15 */
 	__ASSERT((exc > 3) && (exc < 16), "");
 	return __scs.scb.shpr[exc - 4];
+#endif /* CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 
 /**
  *
  * @brief Set priority of an exception
  *
- * Only works with exceptions 4 to 15; i.e. do not use this for interrupts, which
+ * Only works with exceptions; i.e. do not use this for interrupts, which
  * are exceptions 16+.
  *
  * Note that the processor might not implement all 8 bits, in which case the
  * lower N bits are ignored.
  *
- * Exceptions 1 to 3 priorities are fixed (-3, -2, -1).
+ * ARMv6-M: Exceptions 1 to 3 priorities are fixed (-3, -2, -1) and 4 to 9 are
+ * reserved exceptions.
+ * ARMv7-M: Exceptions 1 to 3 priorities are fixed (-3, -2, -1).
  *
- * @param exc  exception number, 4 to 15
+ * @param exc  exception number, 10 to 15 on ARMv6-M and 4 to 15 on ARMv7-M
  * @param pri  priority, 0 to 255
  * @return N/A
  */
 
 static inline void _ScbExcPrioSet(uint8_t exc, uint8_t pri)
 {
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	volatile uint32_t * const shpr = &__scs.scb.shpr[_PRIO_SHP_IDX(exc)];
+	__ASSERT((exc > 10) && (exc < 16), "");
+	*shpr = ((*shpr & ~((uint32_t)0xff << _PRIO_BIT_SHIFT(exc))) |
+		 ((uint32_t)pri << _PRIO_BIT_SHIFT(exc)));
+#else
 	/* For priority exception handler 4-15 */
 	__ASSERT((exc > 3) && (exc < 16), "");
 	__scs.scb.shpr[exc - 4] = pri;
+#endif /* CONFIG_CPU_CORTEX_M0_M0PLUS */
+}
+
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+/**
+ *
+ * @brief Find out if the currently executing exception is nested
+ *
+ * This routine determines if the currently executing exception is nested.
+ *
+ * @return 1 if nested, 0 otherwise
+ */
+
+static inline int _ScbIsNestedExc(void)
+{
+	/* !bit == preempted exceptions */
+	return !__scs.scb.icsr.bit.rettobase;
+}
+
+/**
+ *
+ * @brief Find out if vector table is in SRAM or ROM
+ *
+ * This routine determines if the currently executing exception is nested.
+ *
+ * @return 1 if in SRAM, 0 if in ROM
+ */
+
+static inline uint32_t _ScbIsVtableInSram(void)
+{
+	return !!__scs.scb.vtor.bit.tblbase;
+}
+
+/**
+ *
+ * @brief Move vector table from SRAM to ROM and vice-versa
+ *
+ * This routine moves the vector table to the given memory region.
+ *
+ * @return 1 if in SRAM, 0 if in ROM
+ */
+
+static inline void _ScbVtableLocationSet(
+	int sram /* 1 to move vector to SRAM, 0 to move it to ROM */
+	)
+{
+	__ASSERT(!(sram & 0xfffffffe), "");
+	__scs.scb.vtor.bit.tblbase = sram;
+}
+
+/**
+ *
+ * @brief Obtain base address of vector table
+ *
+ * This routine returns the vector table's base address.
+ *
+ * @return the base address of the vector table
+ */
+
+static inline uint32_t _ScbVtableAddrGet(void)
+{
+	return __scs.scb.vtor.bit.tbloff;
+}
+
+/**
+ *
+ * @brief Set base address of vector table
+ *
+ * @a addr must align to the number of exception entries in vector table:
+ *
+ *    numException = 16 + num_interrupts where each entry is 4 Bytes
+ *
+ * As a minimum, @a addr must be a multiple of 128:
+ *
+ *  0 <= num_interrupts <  16: multiple 0x080
+ * 16 <= num_interrupts <  48: multiple 0x100
+ * 48 <= num_interrupts < 112: multiple 0x200
+ *               ....
+ * @param addr base address, aligned on 128 minimum
+ *
+ * @return N/A
+ */
+
+static inline void _ScbVtableAddrSet(uint32_t addr)
+{
+	__ASSERT(!(addr & 0x7F), "invalid vtable base Addr");
+	__scs.scb.vtor.bit.tbloff = addr;
+}
+
+/**
+ *
+ * @brief Enable faulting on division by zero
+ *
+ * This routine enables the divide by zero fault.
+ * By default, the CPU ignores the error.
+ *
+ * @return N/A
+ */
+
+static inline void _ScbDivByZeroFaultEnable(void)
+{
+	__scs.scb.ccr.bit.div_0_trp = 1;
+}
+
+/**
+ *
+ * @brief Ignore division by zero errors
+ *
+ * This routine disables the divide by zero fault.
+ * This is the default behavior.
+ *
+ * @return N/A
+ */
+
+static inline void _ScbDivByZeroFaultDisable(void)
+{
+	__scs.scb.ccr.bit.div_0_trp = 0;
+}
+
+/**
+ *
+ * @brief Get the programmed number of priority groups
+ *
+ * Exception priorities can be sub-divided into groups, with sub-priorities.
+ * Within these groups, exceptions do not preempt each other. The sub-priorities
+ * are only used to decide which exception will run when several are pending.
+ *
+ * @return the number of priority groups
+ */
+
+static inline int _ScbNumPriGroupGet(void)
+{
+	return 1 << (7 - __scs.scb.aircr.bit.prigroup);
 }
 
 /**
@@ -1204,6 +1221,9 @@ static inline void _ScbUsageFaultAllFaultsReset(void)
 {
 	__scs.scb.cfsr.byte.ufsr.val = 0xffff;
 }
+
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
+
 #endif /* _ASMLANGUAGE */
 
 #ifdef __cplusplus

@@ -166,9 +166,6 @@ struct uart_driver_api {
 	/** Interrupt driven interrupt update function */
 	int (*irq_update)(struct device *dev);
 
-	/** Interrupt driven input hook function */
-	int (*irq_input_hook)(struct device *dev, uint8_t byte);
-
 	/** Set the callback function */
 	void (*irq_callback_set)(struct device *dev, uart_irq_callback_t cb);
 
@@ -198,9 +195,8 @@ struct uart_driver_api {
  */
 static inline int uart_err_check(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->err_check) {
 		return api->err_check(dev);
 	}
@@ -215,14 +211,14 @@ static inline int uart_err_check(struct device *dev)
  * @param p_char Pointer to character.
  *
  * @retval 0 If a character arrived.
- * @retval -1 If the input buffer if empty.
+ * @retval -1 If no character was available to read (i.e., the UART
+ *            input buffer was empty).
  * @retval -ENOTSUP If the operation is not supported.
  */
 static inline int uart_poll_in(struct device *dev, unsigned char *p_char)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	return api->poll_in(dev, p_char);
 }
 
@@ -244,9 +240,8 @@ static inline int uart_poll_in(struct device *dev, unsigned char *p_char)
 static inline unsigned char uart_poll_out(struct device *dev,
 					  unsigned char out_char)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	return api->poll_out(dev, out_char);
 }
 
@@ -265,9 +260,8 @@ static inline unsigned char uart_poll_out(struct device *dev,
 static inline int uart_fifo_fill(struct device *dev, const uint8_t *tx_data,
 				 int size)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->fifo_fill) {
 		return api->fifo_fill(dev, tx_data, size);
 	}
@@ -287,9 +281,8 @@ static inline int uart_fifo_fill(struct device *dev, const uint8_t *tx_data,
 static inline int uart_fifo_read(struct device *dev, uint8_t *rx_data,
 				 const int size)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->fifo_read) {
 		return api->fifo_read(dev, rx_data, size);
 	}
@@ -306,9 +299,8 @@ static inline int uart_fifo_read(struct device *dev, uint8_t *rx_data,
  */
 static inline void uart_irq_tx_enable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_tx_enable) {
 		api->irq_tx_enable(dev);
 	}
@@ -322,9 +314,8 @@ static inline void uart_irq_tx_enable(struct device *dev)
  */
 static inline void uart_irq_tx_disable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_tx_disable) {
 		api->irq_tx_disable(dev);
 	}
@@ -340,9 +331,8 @@ static inline void uart_irq_tx_disable(struct device *dev)
  */
 static inline int uart_irq_tx_ready(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_tx_ready) {
 		return api->irq_tx_ready(dev);
 	}
@@ -359,9 +349,8 @@ static inline int uart_irq_tx_ready(struct device *dev)
  */
 static inline void uart_irq_rx_enable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_rx_enable) {
 		api->irq_rx_enable(dev);
 	}
@@ -376,9 +365,8 @@ static inline void uart_irq_rx_enable(struct device *dev)
  */
 static inline void uart_irq_rx_disable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_rx_disable) {
 		api->irq_rx_disable(dev);
 	}
@@ -394,9 +382,8 @@ static inline void uart_irq_rx_disable(struct device *dev)
  */
 static inline int uart_irq_tx_empty(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_tx_empty) {
 		return api->irq_tx_empty(dev);
 	}
@@ -414,9 +401,8 @@ static inline int uart_irq_tx_empty(struct device *dev)
  */
 static inline int uart_irq_rx_ready(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_rx_ready) {
 		return api->irq_rx_ready(dev);
 	}
@@ -432,9 +418,8 @@ static inline int uart_irq_rx_ready(struct device *dev)
  */
 static inline void uart_irq_err_enable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_err_enable) {
 		api->irq_err_enable(dev);
 	}
@@ -450,9 +435,8 @@ static inline void uart_irq_err_enable(struct device *dev)
  */
 static inline void uart_irq_err_disable(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_err_disable) {
 		api->irq_err_disable(dev);
 	}
@@ -469,9 +453,8 @@ static inline void uart_irq_err_disable(struct device *dev)
 
 static inline int uart_irq_is_pending(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_is_pending)	{
 		return api->irq_is_pending(dev);
 	}
@@ -488,62 +471,14 @@ static inline int uart_irq_is_pending(struct device *dev)
  */
 static inline int uart_irq_update(struct device *dev)
 {
-	struct uart_driver_api *api;
+	const struct uart_driver_api *api = dev->driver_api;
 
-	api = (struct uart_driver_api *)dev->driver_api;
 	if (api->irq_update) {
 		return api->irq_update(dev);
 	}
 
 	return 0;
 }
-
-/**
- * @brief Invoke the UART input hook routine if it is installed.
- *
- * The input hook is a custom handler invoked by the ISR on each received
- * character. It allows the detection of a character escape sequence that can
- * be used to override the behavior of the ISR handler.
- *
- * @param dev UART device structure.
- * @param byte Byte to process.
- *
- * @retval 1 If character processing must stop.
- * @retval 0 If it should continue.
- */
-static inline int uart_irq_input_hook(struct device *dev, uint8_t byte)
-{
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
-
-	if ((api != NULL) && (api->irq_input_hook != NULL)) {
-		return api->irq_input_hook(dev, byte);
-	}
-
-	return 0;
-}
-
-/**
- * @brief Set the UART input hook routine.
- *
- * @param dev UART device structure.
- * @param hook Routine to use as UART input hook.
- *
- * @return N/A
- */
-static inline void uart_irq_input_hook_set(struct device *dev,
-		int (*hook)(struct device *, uint8_t))
-{
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
-
-	if (api != NULL) {
-		api->irq_input_hook = hook;
-	}
-}
-
 
 /**
  * @brief Set the IRQ callback function pointer.
@@ -559,9 +494,7 @@ static inline void uart_irq_input_hook_set(struct device *dev,
 static inline void uart_irq_callback_set(struct device *dev,
 					 uart_irq_callback_t cb)
 {
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
+	const struct uart_driver_api *api = dev->driver_api;
 
 	if ((api != NULL) && (api->irq_callback_set != NULL)) {
 		api->irq_callback_set(dev, cb);
@@ -585,9 +518,7 @@ static inline void uart_irq_callback_set(struct device *dev,
 static inline int uart_line_ctrl_set(struct device *dev,
 				     uint32_t ctrl, uint32_t val)
 {
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
+	const struct uart_driver_api *api = dev->driver_api;
 
 	if (api->line_ctrl_set) {
 		return api->line_ctrl_set(dev, ctrl, val);
@@ -609,9 +540,7 @@ static inline int uart_line_ctrl_set(struct device *dev,
 static inline int uart_line_ctrl_get(struct device *dev,
 				     uint32_t ctrl, uint32_t *val)
 {
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
+	const struct uart_driver_api *api = dev->driver_api;
 
 	if (api && api->line_ctrl_get) {
 		return api->line_ctrl_get(dev, ctrl, val);
@@ -639,9 +568,7 @@ static inline int uart_line_ctrl_get(struct device *dev,
  */
 static inline int uart_drv_cmd(struct device *dev, uint32_t cmd, uint32_t p)
 {
-	struct uart_driver_api *api;
-
-	api = (struct uart_driver_api *)dev->driver_api;
+	const struct uart_driver_api *api = dev->driver_api;
 
 	if (api->drv_cmd) {
 		return api->drv_cmd(dev, cmd, p);

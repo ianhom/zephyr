@@ -37,11 +37,11 @@
  *
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <stdio.h>
 #include <errno.h>
 #include <flash.h>
-#include "usb_device.h"
+#include <usb/usb_device.h>
 #include "usb_dfu.h"
 
 
@@ -530,7 +530,10 @@ static int dfu_class_handle_req(struct usb_setup_packet *pSetup,
 
 		/* Set the DFU mode descriptors to be used after reset */
 		dfu_config.usb_device_description = dfu_mode_usb_description;
-		usb_set_config(&dfu_config);
+		if (usb_set_config(&dfu_config) != 0) {
+			DBG("usb_set_config failed in DFU_DETACH\n");
+			return -EIO;
+		}
 		break;
 	default:
 		DBG("DFU UNKNOWN STATE: %d\n", pSetup->bRequest);
@@ -597,6 +600,8 @@ static void dfu_status_cb(enum usb_dc_status_code status)
 static int dfu_custom_handle_req(struct usb_setup_packet *pSetup,
 		int32_t *data_len, uint8_t **data)
 {
+	ARG_UNUSED(data);
+
 	if (REQTYPE_GET_RECIP(pSetup->bmRequestType) ==
 	    REQTYPE_RECIP_INTERFACE) {
 		if (pSetup->bRequest == REQ_SET_INTERFACE) {

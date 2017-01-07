@@ -16,7 +16,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <sections.h>
 #include <misc/__assert.h>
@@ -38,7 +38,7 @@
 
 #define TXEMPTY 0x80 /* Transmit FIFO empty and next character can be sent */
 
-static struct uart_driver_api uart_nsim_driver_api;
+static const struct uart_driver_api uart_nsim_driver_api;
 
 /**
  * @brief Initialize fake serial port
@@ -78,7 +78,7 @@ static int uart_nsim_poll_in(struct device *dev, unsigned char *c)
 
 }
 
-static struct uart_driver_api uart_nsim_driver_api = {
+static const struct uart_driver_api uart_nsim_driver_api = {
 	.poll_out = uart_nsim_poll_out,
 	.poll_in = uart_nsim_poll_in,
 };
@@ -89,4 +89,4 @@ static struct uart_device_config uart_nsim_dev_cfg_0 = {
 
 DEVICE_INIT(uart_nsim0, CONFIG_UART_NSIM_PORT_0_NAME, &uart_nsim_init,
 			NULL, &uart_nsim_dev_cfg_0,
-			PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
+			PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);

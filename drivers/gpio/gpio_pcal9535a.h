@@ -21,7 +21,7 @@
 #ifndef _GPIO_PCAL9535A_H_
 #define _GPIO_PCAL9535A_H_
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <gpio.h>
 #include <i2c.h>
@@ -29,14 +29,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/**
- * @brief Initialization function for PCAL9535A
- *
- * @param dev Device struct
- * @return 0 if successful, failed otherwise
- */
-extern int gpio_pcal9535a_init(struct device *dev);
 
 /** Configuration data */
 struct gpio_pcal9535a_config {

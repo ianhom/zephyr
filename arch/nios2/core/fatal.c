@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
-#include <nano_private.h>
+#include <kernel_structs.h>
 #include <misc/printk.h>
 #include <inttypes.h>
 
@@ -43,7 +43,7 @@ const NANO_ESF _default_esf = {
 
 /**
  *
- * @brief Nanokernel fatal error handler
+ * @brief Kernel fatal error handler
  *
  * This routine is called when a fatal error condition is detected by either
  * hardware or software.
@@ -97,7 +97,7 @@ FUNC_NORETURN void _NanoFatalErrorHandler(unsigned int reason,
 	       " r11: 0x%" PRIx32 " r12: 0x%" PRIx32 "\n"
 	       " r13: 0x%" PRIx32 " r14: 0x%" PRIx32
 	       " r15: 0x%" PRIx32 "  ra: 0x%" PRIx32 "\n"
-	       "estatus: %" PRIx32 "\n", sys_thread_self_get(), esf->instr - 4,
+	       "estatus: %" PRIx32 "\n", k_current_get(), esf->instr - 4,
 	       esf->r1, esf->r2, esf->r3, esf->r4,
 	       esf->r5, esf->r6, esf->r7, esf->r8,
 	       esf->r9, esf->r10, esf->r11, esf->r12,
@@ -224,35 +224,26 @@ FUNC_NORETURN void _Fault(const NANO_ESF *esf)
 FUNC_NORETURN void _SysFatalErrorHandler(unsigned int reason,
 					 const NANO_ESF *pEsf)
 {
-	nano_context_type_t curCtx = sys_execution_context_type_get();
-
 	ARG_UNUSED(reason);
 	ARG_UNUSED(pEsf);
 
-	if ((curCtx != NANO_CTX_ISR) && !_is_thread_essential()) {
-#ifdef CONFIG_MICROKERNEL
-		if (curCtx == NANO_CTX_TASK) {
-			extern FUNC_NORETURN void _TaskAbort(void);
-			printk("Fatal task error! Aborting task.\n");
-			_TaskAbort();
-		} else
-#endif /* CONFIG_MICROKERNEL */
-		{
-			printk("Fatal fiber error! Aborting fiber.\n");
-			fiber_abort();
-		}
-		CODE_UNREACHABLE;
-	}
-
-	printk("Fatal fault in %s ! Spinning...\n",
-	       curCtx == NANO_CTX_ISR
-		       ? "ISR"
-		       : curCtx == NANO_CTX_FIBER ? "essential fiber"
-						  : "essential task");
+#if !defined(CONFIG_SIMPLE_FATAL_ERROR_HANDLER)
+	if (k_is_in_isr() || _is_thread_essential()) {
+		printk("Fatal fault in %s! Spinning...\n",
+		       k_is_in_isr() ? "ISR" : "essential thread");
 #ifdef ALT_CPU_HAS_DEBUG_STUB
-	_nios2_break();
+		_nios2_break();
 #endif
-	for (;;)
-		; /* Spin forever */
-}
+		for (;;)
+			; /* spin forever */
+	}
+	printk("Fatal fault in thread %p! Aborting.\n", _current);
+	k_thread_abort(_current);
+#else
+	for (;;) {
+		k_cpu_idle();
+	}
+#endif
 
+	CODE_UNREACHABLE;
+}

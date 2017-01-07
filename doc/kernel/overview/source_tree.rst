@@ -1,52 +1,66 @@
-.. _source_tree:
+.. _source_tree_v2:
 
 Source Tree Structure
 #####################
+
+Understanding the Zephyr source tree can be helpful in locating the code
+associated with a particular Zephyr feature.
 
 The Zephyr source tree provides the following top-level directories,
 each of which may have one or more additional levels of subdirectories
 which are not described here.
 
 :file:`arch`
-    Architecture-specific nanokernel and board code. Each supported
-    architecture has its own subdirectory, which contains additional
-    subdirectories for the following areas:
+    Architecture-specific kernel and system-on-chip (SoC) code.
+    Each supported architecture (for example, x86 and ARM)
+    has its own subdirectory,
+    which contains additional subdirectories for the following areas:
 
-    * architecture-specific nanokernel source files
-    * architecture-specific nanokernel include files for private APIs
-    * board-specific code
+    * architecture-specific kernel source files
+    * architecture-specific kernel include files for private APIs
+    * SoC-specific code
 
 :file:`boards`
     Board related code and configuration files.
 
 :file:`doc`
-    Zephyr documentation-related material and tools.
+    Zephyr documentation source files and tools.
 
 :file:`drivers`
     Device driver code.
+
+:file:`ext`
+    Externally created code that has been integrated into Zephyr
+    from other sources, such as hardware interface code supplied by
+    manufacturers and cryptographic library code.
 
 :file:`include`
     Include files for all public APIs, except those defined under :file:`lib`.
 
 :file:`kernel`
-    Microkernel code, and architecture-independent nanokernel code.
+    Architecture-independent kernel code.
 
 :file:`lib`
     Library code, including the minimal standard C library.
 
 :file:`misc`
-    Miscellaneous code.
-
-:file:`net`
-    Networking code, including the Bluetooth stack and networking stacks.
+    Miscellaneous code that doesn't belong to any of the other top-level
+    directories.
 
 :file:`samples`
-    Sample applications for the microkernel, nanokernel, Bluetooth stack,
-    and networking stacks.
-
-:file:`tests`
-    Test code and benchmarks for the various kernel features.
+    Sample applications that demonstrate the use of Zephyr features.
 
 :file:`scripts`
     Various programs and other files used to build and test Zephyr
     applications.
+
+:file:`tests`
+    Test code and benchmarks for Zephyr features.
+
+:file:`subsys`
+    Subsystems of Zephyr, including:
+    * USB device stack code.
+    * Networking code, including the Bluetooth stack and networking stacks.
+    * File system code.
+    * Bluetooth host and controller
+

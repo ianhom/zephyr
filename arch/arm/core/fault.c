@@ -24,8 +24,8 @@
 #include <toolchain.h>
 #include <sections.h>
 
-#include <nanokernel.h>
-#include <nano_private.h>
+#include <kernel.h>
+#include <kernel_structs.h>
 #include <inttypes.h>
 
 #ifdef CONFIG_PRINTK
@@ -64,12 +64,13 @@
  */
 void _FaultDump(const NANO_ESF *esf, int fault)
 {
-	int escalation = 0;
-
 	PR_EXC("Fault! EXC #%d, Thread: %p, instr @ 0x%" PRIx32 "\n",
 	       fault,
-	       sys_thread_self_get(),
+	       k_current_get(),
 	       esf->pc);
+
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	int escalation = 0;
 
 	if (3 == fault) { /* hard fault */
 		escalation = _ScbHardFaultIsForced();
@@ -99,6 +100,7 @@ void _FaultDump(const NANO_ESF *esf, int fault)
 
 	/* clear USFR sticky bits */
 	_ScbUsageFaultAllFaultsReset();
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 #endif
 
@@ -115,9 +117,10 @@ static void _FaultThreadShow(const NANO_ESF *esf)
 {
 	PR_EXC("  Executing thread ID (thread): %p\n"
 	       "  Faulting instruction address:  0x%" PRIx32 "\n",
-	       sys_thread_self_get(),
-	       esf->pc);
+	       k_current_get(), esf->pc);
 }
+
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 
 /**
  *
@@ -228,6 +231,23 @@ static void _UsageFault(const NANO_ESF *esf)
 
 /**
  *
+ * @brief Dump debug monitor exception information
+ *
+ * See _FaultDump() for example.
+ *
+ * @return N/A
+ */
+static void _DebugMonitor(const NANO_ESF *esf)
+{
+	ARG_UNUSED(esf);
+
+	PR_EXC("***** Debug monitor exception (not implemented) *****\n");
+}
+
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
+
+/**
+ *
  * @brief Dump hard fault information
  *
  * See _FaultDump() for example.
@@ -237,6 +257,10 @@ static void _UsageFault(const NANO_ESF *esf)
 static void _HardFault(const NANO_ESF *esf)
 {
 	PR_EXC("***** HARD FAULT *****\n");
+
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+	_FaultThreadShow(esf);
+#else /* CONFIG_CPU_CORTEX_M3_M4 */
 	if (_ScbHardFaultIsBusErrOnVectorRead()) {
 		PR_EXC("  Bus fault on vector table read\n");
 	} else if (_ScbHardFaultIsForced()) {
@@ -249,19 +273,7 @@ static void _HardFault(const NANO_ESF *esf)
 			_UsageFault(esf);
 		}
 	}
-}
-
-/**
- *
- * @brief Dump debug monitor exception information
- *
- * See _FaultDump() for example.
- *
- * @return N/A
- */
-static void _DebugMonitor(const NANO_ESF *esf)
-{
-	PR_EXC("***** Debug monitor exception (not implemented) *****\n");
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
 }
 
 /**
@@ -274,6 +286,8 @@ static void _DebugMonitor(const NANO_ESF *esf)
  */
 static void _ReservedException(const NANO_ESF *esf, int fault)
 {
+	ARG_UNUSED(esf);
+
 	PR_EXC("***** %s %d) *****\n",
 	       fault < 16 ? "Reserved Exception (" : "Spurious interrupt (IRQ ",
 	       fault - 16);
@@ -304,6 +318,7 @@ static void _FaultDump(const NANO_ESF *esf, int fault)
 	case 3:
 		_HardFault(esf);
 		break;
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 	case 4:
 		_MpuFault(esf, 0);
 		break;
@@ -316,6 +331,7 @@ static void _FaultDump(const NANO_ESF *esf, int fault)
 	case 12:
 		_DebugMonitor(esf);
 		break;
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
 	default:
 		_ReservedException(esf, fault);
 		break;
@@ -360,5 +376,7 @@ void _Fault(const NANO_ESF *esf)
  */
 void _FaultInit(void)
 {
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 	_ScbDivByZeroFaultEnable();
+#endif /* !CONFIG_CPU_CORTEX_M0_M0PLUS */
 }

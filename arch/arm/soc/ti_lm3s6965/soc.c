@@ -22,7 +22,7 @@
  * for the ti_lm3s6965 platform.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <init.h>
 #include <soc.h>
@@ -51,4 +51,4 @@ static int ti_lm3s6965_init(struct device *arg)
 	return 0;
 }
 
-SYS_INIT(ti_lm3s6965_init, PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(ti_lm3s6965_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);

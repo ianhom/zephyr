@@ -23,7 +23,7 @@
  */
 
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <toolchain.h>
 #include <sections.h>
@@ -62,4 +62,4 @@ int _i8259_init(struct device *unused)
 	return 0;
 }
 
-SYS_INIT(_i8259_init, PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(_i8259_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);

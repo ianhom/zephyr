@@ -23,7 +23,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <soc.h>
 #include "pinmux.h"
@@ -70,20 +70,22 @@ static int pinmux_stm32_pullup(struct device *dev,
 	return -ENOTSUP;
 }
 
-static struct pinmux_driver_api pinmux_stm32_api = {
+static const struct pinmux_driver_api pinmux_stm32_api = {
 	.set = pinmux_stm32_set,
 	.get = pinmux_stm32_get,
 	.pullup = pinmux_stm32_pullup,
 	.input = pinmux_stm32_input,
 };
 
-int pinmux_stm32_init(struct device *port)
+static int pinmux_stm32_init(struct device *port)
 {
+	ARG_UNUSED(port);
+
 	return 0;
 }
 
 DEVICE_AND_API_INIT(pmux_dev, CONFIG_PINMUX_DEV_NAME, &pinmux_stm32_init,
 		    NULL, NULL,
-		    PRIMARY,
+		    PRE_KERNEL_1,
 		    CONFIG_PINMUX_STM32_DEVICE_INITIALIZATION_PRIORITY,
 		    &pinmux_stm32_api);

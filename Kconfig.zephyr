@@ -32,11 +32,9 @@ source "misc/Kconfig"
 
 source "lib/Kconfig"
 
-source "fs/Kconfig"
+source "subsys/Kconfig"
 
 source "ext/Kconfig"
-
-source "usb/Kconfig"
 
 source "tests/Kconfig"
 
@@ -48,4 +46,4 @@ source "tests/Kconfig"
 # because board usually overrides SoC values.
 #
 source "arch/*/soc/*/Kconfig.defconfig"
-source "boards/*/Kconfig.defconfig"
+source "boards/*/*/Kconfig.defconfig"

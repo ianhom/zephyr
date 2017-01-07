@@ -24,23 +24,9 @@
  * provide a random number generator.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <drivers/rand32.h>
-
-/**
- *
- * @brief Initialize the random number generator
- *
- * The non-random number generator does not require any initialization.
- * Routine is automatically invoked by the kernel during system startup.
- *
- * @return N/A
- */
-
-void sys_rand32_init(void)
-{
-}
 
 /**
  *

@@ -26,24 +26,24 @@
 
 #define _ASMLANGUAGE
 
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 #include <toolchain.h>
 #include <arch/cpu.h>
 #include <v2/irq.h>
-#include "swap_macros.h"
+#include <swap_macros.h>
 
 GTEXT(_Swap)
-
-GDATA(_nanokernel)
+GDATA(_k_neg_eagain)
+GDATA(_kernel)
 
 /**
  *
  * @brief Initiate a cooperative context switch
  *
- * The _Swap() routine is invoked by various nanokernel services to effect
+ * The _Swap() routine is invoked by various kernel services to effect
  * a cooperative context switch.  Prior to invoking _Swap(), the caller
- * disables interrupts via nanoCpuIntLock() and the return 'key' is passed as a
+ * disables interrupts via irq_lock() and the return 'key' is passed as a
  * parameter to _Swap(). The key is in fact the value stored in the register
  * operand of a CLRI instruction.
  *
@@ -55,13 +55,15 @@ GDATA(_nanokernel)
  * popped when returning from _Swap(), but is not suitable for handling a return
  * from an exception. Thus, the fact that the thread is pending because of a
  * cooperative call to _Swap() has to be recorded via the _CAUSE_COOP code in
- * the relinquish_cause of the thread's tTCS. The _IrqExit()/_FirqExit() code
- * will take care of doing the right thing to restore the thread status.
+ * the relinquish_cause of the thread's k_thread structure. The
+ * _IrqExit()/_FirqExit() code will take care of doing the right thing to
+ * restore the thread status.
  *
  * When _Swap() is invoked, we know the decision to perform a context switch or
  * not has already been taken and a context switch must happen.
  *
- * @return may contain a return value setup by a call to fiberRtnValueSet()
+ * @return may contain a return value setup by a call to
+ * _set_thread_return_value()
  *
  * C function prototype:
  *
@@ -73,12 +75,21 @@ SECTION_FUNC(TEXT, _Swap)
 
 	/* interrupts are locked, interrupt key is in r0 */
 
-	mov r1, _nanokernel
-	ld_s r2, [r1, __tNANO_current_OFFSET]
+	mov r1, _kernel
+	ld_s r2, [r1, _kernel_offset_to_current]
 
 	/* save intlock key */
-	st_s r0, [r2, __tTCS_intlock_key_OFFSET]
-	st _CAUSE_COOP, [r2, __tTCS_relinquish_cause_OFFSET]
+	st_s r0, [r2, _thread_offset_to_intlock_key]
+	st _CAUSE_COOP, [r2, _thread_offset_to_relinquish_cause]
+
+	/*
+         * Carve space for the return value. Setting it to a defafult of
+         * -EAGAIN eliminates the need for the timeout code to set it.
+         * If another value is ever needed, it can be modified with
+         * _set_thread_return_value().
+         */
+	ld r3, [_k_neg_eagain]
+	st_s r3, [r2, _thread_offset_to_return_value]
 
 	/*
 	 * Save status32 and blink on the stack before the callee-saved registers.
@@ -95,47 +106,23 @@ SECTION_FUNC(TEXT, _Swap)
 
 	_save_callee_saved_regs
 
-	ld_s r2, [r1, __tNANO_fiber_OFFSET]
-	breq r2, 0, _swap_to_the_task
-
-.balign 4
-_swap_to_a_fiber:
-
-	ld_s r3, [r2, __tTCS_link_OFFSET]
-	b.d _finish_swapping_to_thread    /* always execute delay slot */
-	st_s r3, [r1, __tNANO_fiber_OFFSET] /* delay slot */
-
-.balign 4
-_swap_to_the_task:
-
-	ld_s r2, [r1, __tNANO_task_OFFSET]
-
-	/* fall through */
-
-.balign 4
-_finish_swapping_to_thread:
-
+	/* get the cached thread to run */
+	ld_s r2, [r1, _kernel_offset_to_ready_q_cache]
 
 	/* entering here, r2 contains the new current thread */
-#if 0
-/* don't save flags in tNANO: slower, error-prone, and might not even give
- * a speed boost where it's supposed to */
-	ld_s r3, [r2, __tTCS_flags_OFFSET]
-	st_s r3, [r1, __tNANO_flags_OFFSET]
-#endif
 #ifdef CONFIG_ARC_STACK_CHECKING
 	/* Use stack top and down registers from restored context */
-	add r3, r2, __tTCS_NOFLOAT_SIZEOF
+	add r3, r2, _K_THREAD_NO_FLOAT_SIZEOF
 	sr r3, [_ARC_V2_KSTACK_TOP]
-	ld_s r3, [r2, __tTCS_stack_top_OFFSET]
+	ld_s r3, [r2, _thread_offset_to_stack_top]
 	sr r3, [_ARC_V2_KSTACK_BASE]
 #endif
 	/* XXX - can be moved to delay slot of _CAUSE_RIRQ ? */
-	st_s r2, [r1, __tNANO_current_OFFSET]
+	st_s r2, [r1, _kernel_offset_to_current]
 
 	_load_callee_saved_regs
 
-	ld_s r3, [r2, __tTCS_relinquish_cause_OFFSET]
+	ld_s r3, [r2, _thread_offset_to_relinquish_cause]
 
 	breq r3, _CAUSE_RIRQ, _swap_return_from_rirq
 	nop
@@ -147,9 +134,9 @@ _finish_swapping_to_thread:
 .balign 4
 _swap_return_from_coop:
 
-	ld_s r1, [r2, __tTCS_intlock_key_OFFSET]
-	st  0, [r2, __tTCS_intlock_key_OFFSET]
-	ld_s r0, [r2, __tTCS_return_value_OFFSET]
+	ld_s r1, [r2, _thread_offset_to_intlock_key]
+	st  0, [r2, _thread_offset_to_intlock_key]
+	ld_s r0, [r2, _thread_offset_to_return_value]
 
 	lr ilink, [_ARC_V2_STATUS32]
 	bbit1 ilink, _ARC_V2_STATUS32_AE_BIT, _return_from_exc

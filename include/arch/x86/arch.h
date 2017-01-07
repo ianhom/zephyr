@@ -16,9 +16,9 @@
 
 /**
  * @file
- * @brief IA-32 specific nanokernel interface header
- * This header contains the IA-32 specific nanokernel interface.  It is included
- * by the generic nanokernel interface header (nanokernel.h)
+ * @brief IA-32 specific kernel interface header
+ * This header contains the IA-32 specific kernel interface.  It is included
+ * by the generic kernel interface header (include/arch/cpu.h)
  */
 
 #ifndef _ARCH_IFACE_H
@@ -381,21 +381,10 @@ static ALWAYS_INLINE void _arch_irq_unlock(unsigned int key)
 
 /**
  * The NANO_SOFT_IRQ macro must be used as the value for the @a irq parameter
- * to NANO_CPU_INT_REGSITER when connecting to an interrupt that does not
+ * to NANO_CPU_INT_REGISTER when connecting to an interrupt that does not
  * correspond to any IRQ line (such as spurious vector or SW IRQ)
  */
 #define NANO_SOFT_IRQ	((unsigned int) (-1))
-
-#ifdef CONFIG_FP_SHARING
-/* Definitions for the 'options' parameter to the fiber_fiber_start() API */
-
-/** thread uses floating point unit */
-#define USE_FP		0x10
-#ifdef CONFIG_SSE
-/** thread uses SSEx instructions */
-#define USE_SSE		0x20
-#endif /* CONFIG_SSE */
-#endif /* CONFIG_FP_SHARING */
 
 /**
  * @brief Enable a specific IRQ
@@ -408,30 +397,66 @@ extern void	_arch_irq_enable(unsigned int irq);
  */
 extern void	_arch_irq_disable(unsigned int irq);
 
-#ifdef CONFIG_FP_SHARING
-#ifdef CONFIG_KERNEL_V2
-extern void k_float_enable(k_tid_t thread_id, unsigned int options);
-extern void k_float_disable(k_tid_t thread_id);
-#else
 /**
- * @brief Enable floating point hardware resources sharing
- * Dynamically enable/disable the capability of a thread to share floating
- * point hardware resources.  The same "floating point" options accepted by
- * fiber_fiber_start() are accepted by these APIs (i.e. USE_FP and USE_SSE).
+ * @defgroup float_apis Floating Point APIs
+ * @ingroup kernel_apis
+ * @{
  */
-extern void	fiber_float_enable(nano_thread_id_t thread_id,
-								unsigned int options);
-extern void	task_float_enable(nano_thread_id_t thread_id,
-								unsigned int options);
-extern void	fiber_float_disable(nano_thread_id_t thread_id);
-extern void	task_float_disable(nano_thread_id_t thread_id);
 
-#endif /* CONFIG_KERNEL_V2 */
-#endif /* CONFIG_FP_SHARING */
+/**
+ * @brief Enable preservation of floating point context information.
+ *
+ * This routine informs the kernel that the specified thread (which may be
+ * the current thread) will be using the floating point registers.
+ * The @a options parameter indicates which floating point register sets
+ * will be used by the specified thread:
+ *
+ *  a) K_FP_REGS  indicates x87 FPU and MMX registers only
+ *  b) K_SSE_REGS indicates SSE registers (and also x87 FPU and MMX registers)
+ *
+ * Invoking this routine initializes the thread's floating point context info
+ * to that of an FPU that has been reset. The next time the thread is scheduled
+ * by _Swap() it will either inherit an FPU that is guaranteed to be in a "sane"
+ * state (if the most recent user of the FPU was cooperatively swapped out)
+ * or the thread's own floating point context will be loaded (if the most
+ * recent user of the FPU was pre-empted, or if this thread is the first user
+ * of the FPU). Thereafter, the kernel will protect the thread's FP context
+ * so that it is not altered during a preemptive context switch.
+ *
+ * @warning
+ * This routine should only be used to enable floating point support for a
+ * thread that does not currently have such support enabled already.
+ *
+ * @param thread ID of thread.
+ * @param options Registers to be preserved (K_FP_REGS or K_SSE_REGS).
+ *
+ * @return N/A
+ */
+extern void k_float_enable(k_tid_t thread, unsigned int options);
+
+/**
+ * @brief Disable preservation of floating point context information.
+ *
+ * This routine informs the kernel that the specified thread (which may be
+ * the current thread) will no longer be using the floating point registers.
+ *
+ * @warning
+ * This routine should only be used to disable floating point support for
+ * a thread that currently has such support enabled.
+ *
+ * @param thread ID of thread.
+ *
+ * @return N/A
+ */
+extern void k_float_disable(k_tid_t thread);
+
+/**
+ * @}
+ */
 
 #include <stddef.h>	/* for size_t */
 
-extern void	nano_cpu_idle(void);
+extern void	k_cpu_idle(void);
 
 /** Nanokernel provided routine to report any detected fatal error. */
 extern FUNC_NORETURN void _NanoFatalErrorHandler(unsigned int reason,

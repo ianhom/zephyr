@@ -30,11 +30,7 @@ extern "C" {
 typedef void (*spi_intel_config_t)(void);
 
 struct spi_intel_config {
-	uint32_t regs;
 	uint32_t irq;
-#ifdef CONFIG_PCI
-	struct pci_dev_info pci_dev;
-#endif /* CONFIG_PCI */
 	spi_intel_config_t config_func;
 #ifdef CONFIG_SPI_CS_GPIO
 	char *cs_gpio_name;
@@ -43,7 +39,11 @@ struct spi_intel_config {
 };
 
 struct spi_intel_data {
-	device_sync_call_t sync;
+	uint32_t regs;
+#ifdef CONFIG_PCI
+	struct pci_dev_info pci_dev;
+#endif /* CONFIG_PCI */
+	struct k_sem device_sync_sem;
 	uint8_t error;
 	uint8_t padding[3];
 #ifdef CONFIG_SPI_CS_GPIO

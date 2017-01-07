@@ -87,8 +87,10 @@ int stm32_gpio_flags_to_conf(int flags, int *pincfg)
 	}
 
 	if (direction == GPIO_DIR_OUT) {
+		/* Pin is configured as an output */
 		*pincfg = STM32F10X_PIN_CONFIG_DRIVE_PUSH_PULL;
-	} else if (direction == GPIO_DIR_IN) {
+	} else {
+		/* Pin is configured as an input */
 		int pud = flags & GPIO_PUD_MASK;
 
 		/* pull-{up,down} maybe? */
@@ -100,14 +102,12 @@ int stm32_gpio_flags_to_conf(int flags, int *pincfg)
 			/* floating */
 			*pincfg = STM32F10X_PIN_CONFIG_BIAS_HIGH_IMPEDANCE;
 		}
-	} else {
-		return -ENOTSUP;
 	}
 
 	return 0;
 }
 
-int stm32_gpio_configure(uint32_t *base_addr, int pin, int conf)
+int stm32_gpio_configure(uint32_t *base_addr, int pin, int conf, int altf)
 {
 	volatile struct stm32f10x_gpio *gpio =
 		(struct stm32f10x_gpio *)(base_addr);
@@ -118,6 +118,8 @@ int stm32_gpio_configure(uint32_t *base_addr, int pin, int conf)
 	 * registers
 	 */
 	volatile uint32_t *reg = &gpio->crl;
+
+	ARG_UNUSED(altf);
 
 	if (crpin > 7) {
 		reg = &gpio->crh;

@@ -27,10 +27,10 @@
  */
 
 #include <kernel.h>
-#include <nano_private.h>
+#include <kernel_structs.h>
 #include <toolchain.h>
 #include <sections.h>
-#include <sched.h>
+#include <ksched.h>
 #include <wait_q.h>
 
 extern void _k_thread_single_abort(struct tcs *thread);
@@ -42,6 +42,7 @@ void k_thread_abort(k_tid_t thread)
 	key = irq_lock();
 
 	_k_thread_single_abort(thread);
+	_thread_monitor_exit(thread);
 
 	if (_current == thread) {
 		if (_ScbIsInThreadMode()) {

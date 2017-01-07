@@ -18,56 +18,34 @@
  * @file
  * @brief New thread creation for ARM Cortex-M
  *
- * Core nanokernel fiber related primitives for the ARM Cortex-M processor
- * architecture.
+ * Core thread related primitives for the ARM Cortex-M processor architecture.
  */
 
-#include <nanokernel.h>
-#include <arch/cpu.h>
+#include <kernel.h>
 #include <toolchain.h>
-#include <nano_private.h>
+#include <kernel_structs.h>
 #include <wait_q.h>
 #ifdef CONFIG_INIT_STACKS
 #include <string.h>
 #endif /* CONFIG_INIT_STACKS */
 
-tNANO _nanokernel = {0};
-
 #if defined(CONFIG_THREAD_MONITOR)
-#define THREAD_MONITOR_INIT(tcs) _thread_monitor_init(tcs)
-#else
-#define THREAD_MONITOR_INIT(tcs) \
-	do {/* do nothing */     \
-	} while ((0))
-#endif
-
-#if defined(CONFIG_THREAD_MONITOR)
-/**
- *
- * @brief Initialize thread monitoring support
- *
- * Currently only inserts the new thread in the list of active threads.
- *
- * @return N/A
+/*
+ * Add a thread to the kernel's list of active threads.
  */
-
-static ALWAYS_INLINE void _thread_monitor_init(struct tcs *tcs /* thread */
-					   )
+static ALWAYS_INLINE void thread_monitor_init(struct tcs *tcs)
 {
 	unsigned int key;
 
-	/*
-	 * Add the newly initialized thread to head of the list of threads.
-	 * This singly linked list of threads maintains ALL the threads in the
-	 * system:
-	 * both tasks and fibers regardless of whether they are runnable.
-	 */
-
 	key = irq_lock();
-	tcs->next_thread = _nanokernel.threads;
-	_nanokernel.threads = tcs;
+	tcs->next_thread = _kernel.threads;
+	_kernel.threads = tcs;
 	irq_unlock(key);
 }
+#else
+#define thread_monitor_init(tcs) \
+	do {/* do nothing */     \
+	} while ((0))
 #endif /* CONFIG_THREAD_MONITOR */
 
 /**
@@ -95,16 +73,18 @@ static ALWAYS_INLINE void _thread_monitor_init(struct tcs *tcs /* thread */
  * @param parameter2 entry point to the second param
  * @param parameter3 entry point to the third param
  * @param priority thread priority
- * @param options thread options: ESSENTIAL, USE_FP
+ * @param options thread options: K_ESSENTIAL, K_FP_REGS
  *
  * @return N/A
  */
 
-void _new_thread(char *pStackMem, unsigned stackSize,
-		 void *uk_task_ptr, _thread_entry_t pEntry,
+void _new_thread(char *pStackMem, size_t stackSize,
+		 _thread_entry_t pEntry,
 		 void *parameter1, void *parameter2, void *parameter3,
 		 int priority, unsigned options)
 {
+	_ASSERT_VALID_PRIO(priority, pEntry);
+
 	__ASSERT(!((uint32_t)pStackMem & (STACK_ALIGN - 1)),
 		 "stack is not aligned properly\n"
 		 "%d-byte alignment required\n", STACK_ALIGN);
@@ -130,19 +110,11 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	pInitCtx->xpsr =
 		0x01000000UL; /* clear all, thumb bit is 1, even if RO */
 
-#ifdef CONFIG_KERNEL_V2
-	/* k_q_node initialized upon first insertion in a list */
-	tcs->flags = options | K_PRESTART;
-	tcs->sched_locked = 0;
+	_init_thread_base(&tcs->base, priority, K_PRESTART, options);
 
 	/* static threads overwrite it afterwards with real value */
 	tcs->init_data = NULL;
 	tcs->fn_abort = NULL;
-#else
-	tcs->link = NULL;
-	tcs->flags = priority == -1 ? TASK | PREEMPTIBLE : FIBER;
-#endif
-	tcs->prio = priority;
 
 #ifdef CONFIG_THREAD_CUSTOM_DATA
 	/* Initialize custom data field (value is opaque to kernel) */
@@ -158,18 +130,12 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	tcs->entry = (struct __thread_entry *)(pInitCtx);
 #endif
 
-#if !defined(CONFIG_KERNEL_V2) && defined(CONFIG_MICROKERNEL)
-	tcs->uk_task_ptr = uk_task_ptr;
-#else
-	ARG_UNUSED(uk_task_ptr);
-#endif
+	tcs->callee_saved.psp = (uint32_t)pInitCtx;
+	tcs->arch.basepri = 0;
 
-	tcs->preempReg.psp = (uint32_t)pInitCtx;
-	tcs->basepri = 0;
-
-	_nano_timeout_tcs_init(tcs);
+	/* swap_return_value can contain garbage */
 
 	/* initial values in all other registers/TCS entries are irrelevant */
 
-	THREAD_MONITOR_INIT(tcs);
+	thread_monitor_init(tcs);
 }

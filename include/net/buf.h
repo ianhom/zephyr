@@ -22,9 +22,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <toolchain.h>
 #include <misc/util.h>
-#include <nanokernel.h>
+#include <zephyr.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,7 +76,7 @@ struct net_buf_simple {
 	uint16_t len;
 
 	/** Amount of data that this buffer can store. */
-	const uint16_t size;
+	uint16_t size;
 
 	/** Start of the data storage. Not to be accessed directly
 	 *  (the data pointer should be used instead).
@@ -112,6 +111,21 @@ static inline void net_buf_simple_init(struct net_buf_simple *buf,
  *  @return The original tail of the buffer.
  */
 void *net_buf_simple_add(struct net_buf_simple *buf, size_t len);
+
+/**
+ *  @brief Copy bytes from memory to the end of the buffer
+ *
+ *  Copies the given number of bytes to the end of the buffer. Increments the
+ *  data length of the  buffer to account for more data at the end.
+ *
+ *  @param buf Buffer to update.
+ *  @param mem Location of data to be added.
+ *  @param len Length of data to be added
+ *
+ *  @return The original tail of the buffer.
+ */
+void *net_buf_simple_add_mem(struct net_buf_simple *buf, const void *mem,
+			     size_t len);
 
 /**
  *  @brief Add (8-bit) byte at the end of the buffer
@@ -332,7 +346,7 @@ size_t net_buf_simple_tailroom(struct net_buf_simple *buf);
  *  @brief Parsing state of a buffer.
  *
  *  This is used for temporarily storing the parsing state of a buffer
- *  while giving control of the parsing to a routing which we don't
+ *  while giving control of the parsing to a routine which we don't
  *  control.
  */
 struct net_buf_simple_state {
@@ -385,8 +399,8 @@ static inline void net_buf_simple_restore(struct net_buf_simple *buf,
 /** @brief Network buffer representation.
   *
   * This struct is used to represent network buffers. Such buffers are
-  * normally defined through the NET_BUF_POOL() API and allocated using
-  * the net_buf_get() and net_buf_get_timeout() APIS.
+  * normally defined through the NET_BUF_POOL_DEFINE() API and allocated
+  * using the net_buf_alloc() API.
   */
 struct net_buf {
 	union {
@@ -397,8 +411,8 @@ struct net_buf {
 		struct net_buf *frags;
 	};
 
-	/** Size of the user data associated with this buffer. */
-	const uint16_t user_data_size;
+	/** List pointer used for TCP retransmit buffering */
+	sys_snode_t sent_list;
 
 	/** Reference count. */
 	uint8_t ref;
@@ -407,10 +421,7 @@ struct net_buf {
 	uint8_t flags;
 
 	/** Where the buffer should go when freed up. */
-	struct nano_fifo * const free;
-
-	/** Function to be called when the buffer is freed. */
-	void (*const destroy)(struct net_buf *buf);
+	struct net_buf_pool *pool;
 
 	/* Union for convenience access to the net_buf_simple members, also
 	 * preserving the old API.
@@ -425,7 +436,7 @@ struct net_buf {
 			uint16_t len;
 
 			/** Amount of data that this buffer can store. */
-			const uint16_t size;
+			uint16_t size;
 		};
 
 		struct net_buf_simple b;
@@ -437,98 +448,128 @@ struct net_buf {
 	uint8_t __buf[0] __net_buf_align;
 };
 
-/**
- *  @brief Define a pool of buffers of a certain amount and size.
- *
- *  Defines the necessary memory space (array of structs) for the needed
- *  amount of buffers. After this the net_buf_pool_init() API still
- *  needs to be used (at runtime), after which the buffers can be
- *  accessed using the fifo given as one of the parameters.
- *
- *  If provided with a custom destroy callback this callback is
- *  responsible for eventually returning the buffer back to the free
- *  buffers FIFO through nano_fifo_put(buf->free, buf).
- *
- *  @param _name     Name of buffer pool.
- *  @param _count    Number of buffers in the pool.
- *  @param _size     Maximum data size for each buffer.
- *  @param _fifo     FIFO for the buffers when they are unused.
- *  @param _destroy  Optional destroy callback when buffer is freed.
- *  @param _ud_size  Amount of user data space to reserve.
- */
-#define NET_BUF_POOL(_name, _count, _size, _fifo, _destroy, _ud_size)	\
-	struct {							\
-		struct net_buf buf;					\
-		uint8_t data[_size] __net_buf_align;	                \
-		uint8_t ud[ROUND_UP(_ud_size, 4)] __net_buf_align;	\
-	} _name[_count] = {						\
-		[0 ... (_count - 1)] = { .buf = {			\
-			.user_data_size = ROUND_UP(_ud_size, 4),	\
-			.free = _fifo,					\
-			.destroy = _destroy,				\
-			.size = _size } },			        \
+struct net_buf_pool {
+	/** LIFO to place the buffer into when free */
+	struct k_lifo free;
+
+	/** Number of buffers in pool */
+	const uint16_t buf_count;
+
+	/** Number of uninitialized buffers */
+	uint16_t uninit_count;
+
+	/** Data size of each buffer in the pool */
+	const uint16_t buf_size;
+
+	/** Size of the user data associated with each buffer. */
+	const uint16_t user_data_size;
+
+	/** Optional destroy callback when buffer is freed. */
+	void (*const destroy)(struct net_buf *buf);
+
+	/** Helper to access the start of storage (for net_buf_pool_init) */
+	struct net_buf * const __bufs;
+};
+
+#define NET_BUF_POOL_INITIALIZER(_pool, _bufs, _count, _size, _ud_size,      \
+				 _destroy)                                   \
+	{                                                                    \
+		.free = K_LIFO_INITIALIZER(_pool.free),                      \
+		.__bufs = (struct net_buf *)_bufs,                           \
+		.buf_count = _count,                                         \
+		.uninit_count = _count,                                      \
+		.buf_size = _size,                                           \
+		.user_data_size = _ud_size,                                  \
+		.destroy = _destroy,                                         \
 	}
 
-/**
- *  @brief Initialize an available buffers FIFO based on a pool.
+/** @def NET_BUF_POOL_DEFINE
+ *  @brief Define a new pool for buffers
  *
- *  Initializes a buffer pool created using NET_BUF_POOL(). After
- *  calling this API the buffers can ge accessed through the FIFO that
- *  was given to NET_BUF_POOL(), i.e. after this call there should be no
- *  need to access the buffer pool (struct array) directly anymore.
+ *  Defines a net_buf_pool struct and the necessary memory storage (array of
+ *  structs) for the needed amount of buffers. After this,the buffers can be
+ *  accessed from the pool through net_buf_alloc. The pool is defined as a
+ *  static variable, so if it needs to be exported outside the current module
+ *  this needs to happen with the help of a separate pointer rather than an
+ *  extern declaration.
  *
- *  @param pool  Buffer pool to initialize.
+ *  If provided with a custom destroy callback this callback is
+ *  responsible for eventually calling net_buf_destroy() to complete the
+ *  process of returning the buffer to the pool.
+ *
+ *  @param _name     Name of the pool variable.
+ *  @param _count    Number of buffers in the pool.
+ *  @param _size     Maximum data size for each buffer.
+ *  @param _ud_size  Amount of user data space to reserve.
+ *  @param _destroy  Optional destroy callback when buffer is freed.
  */
-#define net_buf_pool_init(pool)						\
-	do {								\
-		int i;							\
-									\
-		nano_fifo_init(pool[0].buf.free);			\
-									\
-		for (i = 0; i < ARRAY_SIZE(pool); i++) {		\
-			nano_fifo_put(pool[i].buf.free, &pool[i]);	\
-		}							\
-	} while (0)
+#define NET_BUF_POOL_DEFINE(_name, _count, _size, _ud_size, _destroy)        \
+	static struct {                                                      \
+		struct net_buf buf;                                          \
+		uint8_t data[_size] __net_buf_align;	                     \
+		uint8_t ud[ROUND_UP(_ud_size, 4)] __net_buf_align;           \
+	} _net_buf_pool_##_name[_count] __noinit;                            \
+	static struct net_buf_pool _name =                                   \
+		NET_BUF_POOL_INITIALIZER(_name, _net_buf_pool_##_name,       \
+					 _count, _size, _ud_size, _destroy)
 
 /**
- *  @brief Get a new buffer from a FIFO.
+ *  @brief Allocate a new buffer from a pool.
  *
- *  Get buffer from a FIFO. The reserve_head parameter is only relevant
- *  if the FIFO in question is a free buffers pool, i.e. the buffer will
- *  end up being initialized upon return. If called for any other FIFO
- *  the reserve_head parameter will be ignored and should be set to 0.
+ *  Allocate a new buffer from a pool.
  *
- *  @param fifo Which FIFO to take the buffer from.
- *  @param reserve_head How much headroom to reserve.
- *
- *  @return New buffer or NULL if out of buffers.
- *
- *  @warning If there are no available buffers and the function is
- *  called from a task or fiber the call will block until a buffer
- *  becomes available in the FIFO. If you want to make sure no blocking
- *  happens use net_buf_get_timeout() instead with TICKS_NONE.
- */
-struct net_buf *net_buf_get(struct nano_fifo *fifo, size_t reserve_head);
-
-/**
- *  @brief Get a new buffer from a FIFO.
- *
- *  Get buffer from a FIFO. The reserve_head parameter is only relevant
- *  if the FIFO in question is a free buffers pool, i.e. the buffer will
- *  end up being initialized upon return. If called for any other FIFO
- *  the reserve_head parameter will be ignored and should be set to 0.
- *
- *  @param fifo Which FIFO to take the buffer from.
- *  @param reserve_head How much headroom to reserve.
- *  @param timeout Affects the action taken should the FIFO be empty.
- *         If TICKS_NONE, then return immediately. If TICKS_UNLIMITED, then
+ *  @param pool Which pool to allocate the buffer from.
+ *  @param timeout Affects the action taken should the pool be empty.
+ *         If K_NO_WAIT, then return immediately. If K_FOREVER, then
  *         wait as long as necessary. Otherwise, wait up to the specified
  *         number of ticks before timing out.
  *
  *  @return New buffer or NULL if out of buffers.
  */
-struct net_buf *net_buf_get_timeout(struct nano_fifo *fifo,
-				    size_t reserve_head, int32_t timeout);
+#if defined(CONFIG_NET_BUF_LOG)
+struct net_buf *net_buf_alloc_debug(struct net_buf_pool *pool, int32_t timeout,
+				    const char *func, int line);
+#define	net_buf_alloc(_pool, _timeout) \
+	net_buf_alloc_debug(_pool, _timeout, __func__, __LINE__)
+#else
+struct net_buf *net_buf_alloc(struct net_buf_pool *pool, int32_t timeout);
+#endif
+
+/**
+ *  @brief Get a buffer from a FIFO.
+ *
+ *  Get buffer from a FIFO.
+ *
+ *  @param fifo Which FIFO to take the buffer from.
+ *  @param timeout Affects the action taken should the FIFO be empty.
+ *         If K_NO_WAIT, then return immediately. If K_FOREVER, then wait as
+ *         long as necessary. Otherwise, wait up to the specified number of
+ *         miliseconds before timing out.
+ *
+ *  @return New buffer or NULL if the FIFO is empty.
+ */
+#if defined(CONFIG_NET_BUF_LOG)
+struct net_buf *net_buf_get_debug(struct k_fifo *fifo, int32_t timeout,
+				  const char *func, int line);
+#define	net_buf_get(_fifo, _timeout) \
+	net_buf_get_debug(_fifo, _timeout, __func__, __LINE__)
+#else
+struct net_buf *net_buf_get(struct k_fifo *fifo, int32_t timeout);
+#endif
+
+/**
+ *  @brief Destroy buffer from custom destroy callback
+ *
+ *  This helper is only intended to be used from custom destroy callbacks.
+ *  If no custom destroy callback is given to NET_BUF_POOL_DEFINE() then
+ *  there is no need to use this API.
+ *
+ *  @param buf Buffer to destroy.
+ */
+static inline void net_buf_destroy(struct net_buf *buf)
+{
+	k_lifo_put(&buf->pool->free, buf);
+}
 
 /**
  *  @brief Initialize buffer with the given headroom.
@@ -551,7 +592,7 @@ void net_buf_reserve(struct net_buf *buf, size_t reserve);
  *  @param fifo Which FIFO to put the buffer to.
  *  @param buf Buffer.
  */
-void net_buf_put(struct nano_fifo *fifo, struct net_buf *buf);
+void net_buf_put(struct k_fifo *fifo, struct net_buf *buf);
 
 /**
  *  @brief Decrements the reference count of a buffer.
@@ -561,7 +602,13 @@ void net_buf_put(struct nano_fifo *fifo, struct net_buf *buf);
  *
  *  @param buf A valid pointer on a buffer
  */
+#if defined(CONFIG_NET_BUF_LOG)
+void net_buf_unref_debug(struct net_buf *buf, const char *func, int line);
+#define	net_buf_unref(_buf) \
+	net_buf_unref_debug(_buf, __func__, __LINE__)
+#else
 void net_buf_unref(struct net_buf *buf);
+#endif
 
 /**
  *  @brief Increment the reference count of a buffer.
@@ -578,10 +625,14 @@ struct net_buf *net_buf_ref(struct net_buf *buf);
  *  Duplicate given buffer including any data and headers currently stored.
  *
  *  @param buf A valid pointer on a buffer
+ *  @param timeout Affects the action taken should the pool be empty.
+ *         If K_NO_WAIT, then return immediately. If K_FOREVER, then
+ *         wait as long as necessary. Otherwise, wait up to the specified
+ *         number of ticks before timing out.
  *
  *  @return Duplicated buffer or NULL if out of buffers.
  */
-struct net_buf *net_buf_clone(struct net_buf *buf);
+struct net_buf *net_buf_clone(struct net_buf *buf, int32_t timeout);
 
 /**
  *  @brief Get a pointer to the user data of a buffer.
@@ -608,6 +659,22 @@ static inline void *net_buf_user_data(struct net_buf *buf)
  *  @return The original tail of the buffer.
  */
 #define net_buf_add(buf, len) net_buf_simple_add(&(buf)->b, len)
+
+/**
+ *  @def net_buf_add_mem
+ *  @brief Copy bytes from memory to the end of the buffer
+ *
+ *  Copies the given number of bytes to the end of the buffer. Increments the
+ *  data length of the  buffer to account for more data at the end.
+ *
+ *  @param buf Buffer to update.
+ *  @param mem Location of data to be added.
+ *  @param len Length of data to be added
+ *
+ *  @return The original tail of the buffer.
+ */
+#define net_buf_add_mem(buf, mem, len) net_buf_simple_add_mem(&(buf)->b, \
+							      mem, len)
 
 /**
  *  @def net_buf_add_u8
@@ -847,12 +914,22 @@ struct net_buf *net_buf_frag_last(struct net_buf *frags);
 
 /** @brief Insert a new fragment to a chain of bufs.
  *
+ *  Insert a new fragment into the buffer fragments list after the parent.
+ *
+ *  Note: This function takes ownership of the fragment reference so the
+ *  caller is not required to unref.
+ *
  *  @param parent Parent buffer/fragment.
  *  @param frag Fragment to insert.
  */
 void net_buf_frag_insert(struct net_buf *parent, struct net_buf *frag);
 
 /** @brief Add a new fragment to the end of a chain of bufs.
+ *
+ *  Append a new fragment into the buffer fragments list.
+ *
+ *  Note: This function takes ownership of the fragment reference so the
+ *  caller is not required to unref.
  *
  *  @param head Head of the fragment chain.
  *  @param frag Fragment to add.

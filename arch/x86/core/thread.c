@@ -16,30 +16,20 @@
 
 /**
  * @file
- * @brief Nanokernel thread support primitives
+ * @brief Thread support primitives
  *
- * This module provides core nanokernel fiber related primitives for the IA-32
+ * This module provides core thread related primitives for the IA-32
  * processor architecture.
  */
 
-#if !defined(CONFIG_KERNEL_V2)
-#ifdef CONFIG_MICROKERNEL
-#include <microkernel.h>
-#include <micro_private_types.h>
-#endif /* CONFIG_MICROKERNEL */
-#endif
 #ifdef CONFIG_INIT_STACKS
 #include <string.h>
 #endif /* CONFIG_INIT_STACKS */
 
 #include <toolchain.h>
 #include <sections.h>
-#include <nano_private.h>
+#include <kernel_structs.h>
 #include <wait_q.h>
-
-/* the one and only nanokernel control structure */
-
-tNANO _nanokernel = {0};
 
 /* forward declaration */
 
@@ -48,6 +38,25 @@ tNANO _nanokernel = {0};
 void _thread_entry_wrapper(_thread_entry_t, void *,
 			   void *, void *);
 #endif
+
+#if defined(CONFIG_THREAD_MONITOR)
+/*
+ * Add a thread to the kernel's list of active threads.
+ */
+static ALWAYS_INLINE void thread_monitor_init(struct k_thread *thread)
+{
+	unsigned int key;
+
+	key = irq_lock();
+	thread->next_thread = _kernel.threads;
+	_kernel.threads = thread;
+	irq_unlock(key);
+}
+#else
+#define thread_monitor_init(thread) \
+	do {/* do nothing */     \
+	} while ((0))
+#endif /* CONFIG_THREAD_MONITOR */
 
 /**
  *
@@ -62,59 +71,32 @@ void _thread_entry_wrapper(_thread_entry_t, void *,
  * @param pStackMem pointer to thread stack memory
  * @param stackSize size of a stack in bytes
  * @param priority thread priority
- * @param options thread options: ESSENTIAL, USE_FP, USE_SSE
+ * @param options thread options: K_ESSENTIAL, K_FP_REGS, K_SSE_REGS
  *
  * @return N/A
  */
 static void _new_thread_internal(char *pStackMem, unsigned stackSize,
-				 void *uk_task_ptr, int priority,
+				 int priority,
 				 unsigned options)
 {
 	unsigned long *pInitialCtx;
-	/* ptr to the new task's tcs */
-	struct tcs *tcs = (struct tcs *)pStackMem;
+	/* ptr to the new task's k_thread */
+	struct k_thread *thread = (struct k_thread *)pStackMem;
 
-#ifndef CONFIG_FP_SHARING
-	ARG_UNUSED(options);
-#endif /* !CONFIG_FP_SHARING */
-
-	tcs->prio = priority;
 #if (defined(CONFIG_FP_SHARING) || defined(CONFIG_GDB_INFO))
-	tcs->excNestCount = 0;
+	thread->arch.excNestCount = 0;
 #endif /* CONFIG_FP_SHARING || CONFIG_GDB_INFO */
 
-#ifdef CONFIG_KERNEL_V2
-	/* k_q_node initialized upon first insertion in a list */
-#ifdef CONFIG_FP_SHARING
-	/* ensure USE_FP is set when USE_SSE is set */
-	if (options & USE_SSE) {
-		options |= USE_FP;
-	}
-#endif
-	tcs->flags = options | K_PRESTART;
-	tcs->sched_locked = 0;
+	_init_thread_base(&thread->base, priority, K_PRESTART, options);
 
 	/* static threads overwrite it afterwards with real value */
-	tcs->init_data = NULL;
-	tcs->fn_abort = NULL;
-#else
-	if (priority == -1)
-		tcs->flags = PREEMPTIBLE | TASK;
-	else
-		tcs->flags = FIBER;
-	tcs->link = (struct tcs *)NULL; /* thread not inserted into list yet */
-#endif
+	thread->init_data = NULL;
+	thread->fn_abort = NULL;
 
 #ifdef CONFIG_THREAD_CUSTOM_DATA
 	/* Initialize custom data field (value is opaque to kernel) */
 
-	tcs->custom_data = NULL;
-#endif
-
-#if !defined(CONFIG_KERNEL_V2) && defined(CONFIG_MICROKERNEL)
-	tcs->uk_task_ptr = uk_task_ptr;
-#else
-	ARG_UNUSED(uk_task_ptr);
+	thread->custom_data = NULL;
 #endif
 
 	/*
@@ -129,10 +111,10 @@ static void _new_thread_internal(char *pStackMem, unsigned stackSize,
 
 #ifdef CONFIG_THREAD_MONITOR
 	/*
-	 * In debug mode tcs->entry give direct access to the thread entry
+	 * In debug mode thread->entry give direct access to the thread entry
 	 * and the corresponding parameters.
 	 */
-	tcs->entry = (struct __thread_entry *)(pInitialCtx -
+	thread->entry = (struct __thread_entry *)(pInitialCtx -
 		sizeof(struct __thread_entry));
 #endif
 
@@ -145,87 +127,12 @@ static void _new_thread_internal(char *pStackMem, unsigned stackSize,
 	 */
 	pInitialCtx -= 11;
 
-	tcs->coopReg.esp = (unsigned long)pInitialCtx;
-	PRINTK("\nInitial context ESP = 0x%x\n", tcs->coopReg.esp);
+	thread->callee_saved.esp = (unsigned long)pInitialCtx;
+	PRINTK("\nInitial context ESP = 0x%x\n", thread->coopReg.esp);
 
-#ifndef CONFIG_KERNEL_V2
-#ifdef CONFIG_FP_SHARING
-/*
- * Indicate if the thread is permitted to use floating point instructions.
- *
- * The first time the new thread is scheduled by _Swap() it is guaranteed
- * to inherit an FPU that is in a "sane" state (if the most recent user of
- * the FPU was cooperatively swapped out) or a completely "clean" state
- * (if the most recent user of the FPU was pre-empted, or if the new thread
- * is the first user of the FPU).
- *
- * The USE_FP flag bit is set in the struct tcs structure if a thread is
- * authorized to use _any_ non-integer capability, whether it's the basic
- * x87 FPU/MMX capability, SSE instructions, or a combination of both. The
- * USE_SSE flag bit is set only if a thread can use SSE instructions.
- *
- * Note: Callers need not follow the aforementioned protocol when passing
- * in thread options. It is legal for the caller to specify _only_ the
- * USE_SSE option bit if a thread will be utilizing SSE instructions (and
- * possibly x87 FPU/MMX instructions).
- */
+	PRINTK("\nstruct thread * = 0x%x", thread);
 
-/*
- * Implementation Remark:
- * Until SysGen reserves SSE_GROUP as 0x10, the following conditional is
- * required so that at least systems configured with FLOAT will still operate
- * correctly.  The issue is that SysGen will utilize group 0x10 user-defined
- * groups, and thus tasks placed in the user-defined group will have the
- * SSE_GROUP (but not the FPU_GROUP) bit set.  This results in both the USE_FP
- * and USE_SSE bits being set in the struct tcs.  For systems configured only with
- * FLOAT, the setting of the USE_SSE is harmless, but the setting of USE_FP is
- * wasteful.  Thus to ensure that that systems configured only with FLOAT
- * behave as expected, the USE_SSE option bit is ignored.
- *
- * Clearly, even with the following conditional, systems configured with
- * SSE will not behave as expected since tasks may still be inadvertantly
- * have the USE_SSE+USE_FP sets even though they are integer only.
- *
- * Once the generator tool has been updated to reserve the SSE_GROUP, the
- * correct code to use is:
- *
- *    options &= USE_FP | USE_SSE;
- *
- */
-
-#ifdef CONFIG_SSE
-	options &= USE_FP | USE_SSE;
-#else
-	options &= USE_FP;
-#endif
-
-	if (options != 0) {
-		tcs->flags |= (options | USE_FP);
-	}
-#endif /* CONFIG_FP_SHARING */
-#endif /* CONFIG_KERNEL_V2 */
-
-	PRINTK("\nstruct tcs * = 0x%x", tcs);
-
-#if defined(CONFIG_THREAD_MONITOR)
-	{
-		unsigned int imask;
-
-		/*
-		 * Add the newly initialized thread to head of the list of threads.
-		 * This singly linked list of threads maintains ALL the threads in the
-		 * system: both tasks and fibers regardless of whether they are
-		 * runnable.
-		 */
-
-		imask = irq_lock();
-		tcs->next_thread = _nanokernel.threads;
-		_nanokernel.threads = tcs;
-		irq_unlock(imask);
-	}
-#endif /* CONFIG_THREAD_MONITOR */
-
-	_nano_timeout_tcs_init(tcs);
+	thread_monitor_init(thread);
 }
 
 #if defined(CONFIG_GDB_INFO) || defined(CONFIG_DEBUG_INFO) \
@@ -315,7 +222,7 @@ __asm__("\t.globl _thread_entry\n"
  * This function is utilized to create execution threads for both fiber
  * threads and kernel tasks.
  *
- * The "thread control block" (TCS) is carved from the "end" of the specified
+ * The k_thread structure is carved from the "end" of the specified
  * thread stack memory.
  *
  * @param pStackmem the pointer to aligned stack memory
@@ -325,16 +232,18 @@ __asm__("\t.globl _thread_entry\n"
  * @param parameter2 second param to entry point
  * @param parameter3 third param to entry point
  * @param priority thread priority
- * @param options thread options: ESSENTIAL, USE_FP, USE_SSE
+ * @param options thread options: K_ESSENTIAL, K_FP_REGS, K_SSE_REGS
  *
  *
- * @return opaque pointer to initialized TCS structure
+ * @return opaque pointer to initialized k_thread structure
  */
-void _new_thread(char *pStackMem, unsigned stackSize,
-		 void *uk_task_ptr, _thread_entry_t pEntry,
+void _new_thread(char *pStackMem, size_t stackSize,
+		 _thread_entry_t pEntry,
 		 void *parameter1, void *parameter2, void *parameter3,
 		 int priority, unsigned options)
 {
+	_ASSERT_VALID_PRIO(priority, pEntry);
+
 	unsigned long *pInitialThread;
 
 #ifdef CONFIG_INIT_STACKS
@@ -349,8 +258,6 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	/*
 	 * Create an initial context on the stack expected by the _Swap()
 	 * primitive.
-	 * Given that both task and fibers execute at privilege 0, the
-	 * setup for both threads are equivalent.
 	 */
 
 	/* push arguments required by _thread_entry() */
@@ -387,9 +294,9 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	 */
 
 	/*
-	 * For kernel tasks and fibers the thread the thread control struct (TCS)
-	 * is located at the "low end" of memory set aside for the thread's stack.
+	 * The k_thread structure is located at the "low end" of memory set
+	 * aside for the thread's stack.
 	 */
 
-	_new_thread_internal(pStackMem, stackSize, uk_task_ptr, priority, options);
+	_new_thread_internal(pStackMem, stackSize, priority, options);
 }

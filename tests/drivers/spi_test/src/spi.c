@@ -21,8 +21,6 @@
 #include <spi.h>
 #include <misc/printk.h>
 
-
-
 #define SPI_DRV_NAME "SPI_0"
 
 #ifdef CONFIG_SPI_INTEL
@@ -67,26 +65,52 @@ static void _spi_show(struct spi_config *spi_conf)
 void main(void)
 {
 	struct device *spi;
+	uint32_t len = 0;
 
 	printk("==== SPI Test Application ====\n");
 
 	spi = device_get_binding(SPI_DRV_NAME);
+	if (!spi) {
+		printk("SPI device not found\n");
+		return;
+	}
 
 	printk("Running...\n");
 
-	spi_configure(spi, &spi_conf);
-	spi_slave_select(spi, SPI_SLAVE);
+	if (spi_configure(spi, &spi_conf) != 0) {
+		printk("SPI config failed\n");
+		return;
+	}
+
+	if (spi_slave_select(spi, SPI_SLAVE) != 0) {
+		printk("SPI slave select failed\n");
+		return;
+	}
 
 	_spi_show(&spi_conf);
 
 	printk("Writing...\n");
-	spi_write(spi, (uint8_t *) wbuf, 6);
+
+	if (spi_write(spi, (uint8_t *) wbuf, 6) != 0) {
+		printk("SPI write failed\n");
+		return;
+	}
 
 	printk("SPI sent: %s\n", wbuf);
-	print_buf_hex(rbuf, 6);
+	print_buf_hex(wbuf, 6);
 
-	strcpy(wbuf, "So what then?");
-	spi_transceive(spi, wbuf, 14, rbuf, 16);
+	strcpy((char *)wbuf, "So what then?");
+
+	len = strlen(wbuf);
+	/*
+	 * len does not include string terminator.
+	 * Let's sent the terminator as well.
+	 * Also make sure tx and rx have the same length.
+	 */
+	if (spi_transceive(spi, wbuf, len + 1, rbuf, len + 1) != 0) {
+		printk("SPI transceive failed\n");
+		return;
+	}
 
 	printk("SPI transceived: %s\n", rbuf);
 	print_buf_hex(rbuf, 6);

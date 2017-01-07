@@ -62,8 +62,7 @@
 
 static struct bt_gatt_attr server_db[SERVER_MAX_ATTRIBUTES];
 static struct net_buf *server_buf;
-static struct nano_fifo server_fifo;
-static NET_BUF_POOL(server_pool, 1, SERVER_BUF_SIZE, &server_fifo, NULL, 0);
+NET_BUF_POOL_DEFINE(server_pool, 1, SERVER_BUF_SIZE, 0, NULL);
 
 static uint8_t attr_count;
 static uint8_t svc_attr_count;
@@ -437,7 +436,7 @@ static bool ccc_added;
 static struct bt_gatt_ccc_cfg ccc_cfg[CONFIG_BLUETOOTH_MAX_PAIRED] = {};
 static uint8_t ccc_value;
 
-static void ccc_cfg_changed(uint16_t value)
+static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
 	ccc_value = value;
 }
@@ -1787,13 +1786,12 @@ void tester_handle_gatt(uint8_t opcode, uint8_t index, uint8_t *data,
 
 uint8_t tester_init_gatt(void)
 {
-	net_buf_pool_init(server_pool);
-
-	server_buf = net_buf_get_timeout(&server_fifo, SERVER_BUF_SIZE,
-					 TICKS_NONE);
+	server_buf = net_buf_alloc(&server_pool, K_NO_WAIT);
 	if (!server_buf) {
 		return BTP_STATUS_FAILED;
 	}
+
+	net_buf_reserve(server_buf, SERVER_BUF_SIZE);
 
 	return BTP_STATUS_SUCCESS;
 }

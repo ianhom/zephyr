@@ -19,16 +19,17 @@
 #include <device.h>
 #include <drivers/ioapic.h>
 #include <init.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <rtc.h>
 #include <power.h>
+#include <soc.h>
 
 #include "qm_isr.h"
 #include "qm_rtc.h"
 
 struct rtc_data {
 #ifdef CONFIG_RTC_QMSI_API_REENTRANCY
-	struct nano_sem sem;
+	struct k_sem sem;
 #endif
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
 	uint32_t device_power_state;
@@ -78,8 +79,8 @@ static void rtc_reentrancy_init(struct device *dev)
 		return;
 	}
 
-	nano_sem_init(RP_GET(dev));
-	nano_sem_give(RP_GET(dev));
+	k_sem_init(RP_GET(dev), 0, UINT_MAX);
+	k_sem_give(RP_GET(dev));
 }
 
 static void rtc_critical_region_start(struct device *dev)
@@ -88,7 +89,7 @@ static void rtc_critical_region_start(struct device *dev)
 		return;
 	}
 
-	nano_sem_take(RP_GET(dev), TICKS_UNLIMITED);
+	k_sem_take(RP_GET(dev), K_FOREVER);
 }
 
 static void rtc_critical_region_end(struct device *dev)
@@ -97,7 +98,7 @@ static void rtc_critical_region_end(struct device *dev)
 		return;
 	}
 
-	nano_sem_give(RP_GET(dev));
+	k_sem_give(RP_GET(dev));
 }
 
 static void rtc_qmsi_enable(struct device *dev)
@@ -126,6 +127,13 @@ static int rtc_qmsi_set_config(struct device *dev, struct rtc_config *cfg)
 	qm_cfg.callback = (void *) cfg->cb_fn;
 	qm_cfg.callback_data = dev;
 
+	/* Set prescaler value. Ideally, the divider should come from struct
+	 * rtc_config instead. It's safe to use RTC_DIVIDER here for now since
+	 * values defined by clk_rtc_div and by QMSI's clk_rtc_div_t match for
+	 * both D2000 and SE.
+	 */
+	qm_cfg.prescaler = (clk_rtc_div_t)RTC_DIVIDER;
+
 	rtc_critical_region_start(dev);
 
 	if (qm_rtc_set_config(QM_RTC_0, &qm_cfg)) {
@@ -133,6 +141,8 @@ static int rtc_qmsi_set_config(struct device *dev, struct rtc_config *cfg)
 	}
 
 	rtc_critical_region_end(dev);
+
+	k_busy_wait(60);
 
 	return result;
 }
@@ -147,26 +157,33 @@ static uint32_t rtc_qmsi_read(struct device *dev)
 	return QM_RTC[QM_RTC_0].rtc_ccvr;
 }
 
-static struct rtc_driver_api api = {
+static uint32_t rtc_qmsi_get_pending_int(struct device *dev)
+{
+	return QM_RTC[QM_RTC_0].rtc_stat;
+}
+
+static const struct rtc_driver_api api = {
 	.enable = rtc_qmsi_enable,
 	.disable = rtc_qmsi_disable,
 	.read = rtc_qmsi_read,
 	.set_config = rtc_qmsi_set_config,
 	.set_alarm = rtc_qmsi_set_alarm,
+	.get_pending_int = rtc_qmsi_get_pending_int,
 };
 
 static int rtc_qmsi_init(struct device *dev)
 {
 	rtc_reentrancy_init(dev);
 
-	IRQ_CONNECT(QM_IRQ_RTC_0, CONFIG_RTC_0_IRQ_PRI, qm_rtc_isr_0, 0,
+	IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_RTC_0_INT), CONFIG_RTC_0_IRQ_PRI,
+		    qm_rtc_0_isr, NULL,
 		    IOAPIC_EDGE | IOAPIC_HIGH);
 
 	/* Unmask RTC interrupt */
-	irq_enable(QM_IRQ_RTC_0);
+	irq_enable(IRQ_GET_NUMBER(QM_IRQ_RTC_0_INT));
 
-	/* Route RTC interrupt to Lakemont */
-	QM_SCSS_INT->int_rtc_mask &= ~BIT(0);
+	/* Route RTC interrupt to the current core */
+	QM_IR_UNMASK_INTERRUPTS(QM_INTERRUPT_ROUTER->rtc_0_int_mask);
 
 	rtc_qmsi_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
 
@@ -174,21 +191,37 @@ static int rtc_qmsi_init(struct device *dev)
 }
 
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-static uint32_t int_rtc_mask_save;
 
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 static int rtc_suspend_device(struct device *dev)
 {
-	int_rtc_mask_save = QM_SCSS_INT->int_rtc_mask;
 	rtc_qmsi_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
+
 	return 0;
 }
 
 static int rtc_resume_device(struct device *dev)
 {
-	QM_SCSS_INT->int_rtc_mask = int_rtc_mask_save;
+	uint32_t int_rtc_mask;
+
+	/* The interrupt router registers are sticky and retain their
+	 * values across warm resets, so we don't need to save them.
+	 * But for wake capable peripherals, if their interrupts are
+	 * configured to be edge sensitive, the wake event will be lost
+	 * by the time the interrupt controller is reconfigured, while
+	 * the interrupt is still pending. By masking and unmasking again
+	 * the corresponding routing register, the interrupt is forwared
+	 * to the core and the ISR will be serviced as expected.
+	 */
+	int_rtc_mask = QM_INTERRUPT_ROUTER->rtc_0_int_mask;
+	QM_INTERRUPT_ROUTER->rtc_0_int_mask = 0xFFFFFFFF;
+	QM_INTERRUPT_ROUTER->rtc_0_int_mask = int_rtc_mask;
+
 	rtc_qmsi_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
 	return 0;
 }
+#endif
 
 /*
 * Implements the driver control management functionality
@@ -198,11 +231,13 @@ static int rtc_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 				void *context)
 {
 	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
 			return rtc_suspend_device(dev);
 		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
 			return rtc_resume_device(dev);
 		}
+#endif
 	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
 		*((uint32_t *)context) = rtc_qmsi_get_power_state(dev);
 		return 0;
@@ -213,5 +248,5 @@ static int rtc_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 #endif
 
 DEVICE_DEFINE(rtc, CONFIG_RTC_0_NAME, &rtc_qmsi_init, rtc_qmsi_device_ctrl,
-	      RTC_CONTEXT, NULL, SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
-	      (void *)&api);
+	      RTC_CONTEXT, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+	      &api);

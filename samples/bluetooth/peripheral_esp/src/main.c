@@ -156,7 +156,8 @@ static struct humidity_sensor sensor_3 = {
 		.meas.meas_uncertainty = 0x01,
 };
 
-static void temp_ccc_cfg_changed(uint16_t value)
+static void temp_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+				 uint16_t value)
 {
 	simulate_temp = value == BT_GATT_CCC_NOTIFY;
 }
@@ -458,7 +459,7 @@ void main(void)
 	bt_conn_auth_cb_register(&auth_cb_display);
 
 	while (1) {
-		task_sleep(sys_clock_ticks_per_sec);
+		k_sleep(MSEC_PER_SEC);
 
 		/* Temperature simulation */
 		if (simulate_temp) {

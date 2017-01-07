@@ -8,36 +8,44 @@ defined in ``include/net/buf.h``.
 Creating buffers
 ================
 
-Network buffers are created by first declaring a pool of them:
+Network buffers are created by first defining a pool of them:
 
 .. code-block:: c
 
-   static struct nano_fifo free_fifo;
-   static NET_BUF_POOL(pool_name, buf_count, buf_size, &free_fifo, NULL,
-                       user_data_size);
+   NET_BUF_POOL_DEFINE(pool_name, buf_count, buf_size, user_data_size, NULL);
 
-Before operating on the pool it also needs to be initialized at runtime:
+The pool is a static variable, so if it's needed to be exported to
+another module a separate pointer is needed.
 
-.. code-block:: c
-
-   net_buf_pool_init(pool_name);
-
-Once the pool has been initialized the available buffers are managed
-with the help of a nano_fifo object and can be acquired with:
+Once the pool has been defined, buffers can be allocated from it with:
 
 .. code-block:: c
 
-   buf = net_buf_get(&free_fifo, reserve_headroom);
+   buf = net_buf_alloc(&pool_name, timeout);
+
+There is no explicit initialization function for the pool or its
+buffers, rather this is done implicitly as :c:func:`net_buf_alloc` gets
+called.
+
+If there is a need to reserve space in the buffer for protocol headers
+to be prependend later, it's possible to reserve this headroom with:
+
+.. code-block:: c
+
+   net_buf_reserve(buf, headroom);
 
 In addition to actual protocol data and generic parsing context, network
 buffers may also contain protocol-specific context, known as user data.
 Both the maximum data and user data capacity of the buffers is
 compile-time defined when declaring the buffer pool.
 
-Since the free buffers are managed with the help of a nano_fifo it means
-the buffers have native support for being passed through other nano_fifos
-as well. This is a very practical feature when the buffers need to be
-passed from one fiber to another.
+The buffers have native support for being passed through k_fifo kernel
+objects. This is a very practical feature when the buffers need to be
+passed from one thread to another. However, since a net_buf may have a
+fragment chain attached to it, instead of using the :c:func:`k_fifo_put`
+and :c:func:`k_fifo_get` APIs, special :c:func:`net_buf_put` and
+:c:func:`net_buf_get` APIs must be used when passing buffers through
+FIFOs. These APIs ensure that the buffer chains stay intact.
 
 Common Operations
 =================
@@ -87,7 +95,7 @@ Reference Counting
 ==================
 
 Each network buffer is reference counted. The buffer is initially
-acquired from a free buffers pool by calling :c:func:`net_buf_get()`,
+acquired from a free buffers pool by calling :c:func:`net_buf_alloc()`,
 resulting in a buffer with reference count 1. The reference count can be
 incremented with :c:func:`net_buf_ref()` or decremented with
 :c:func:`net_buf_unref()`. When the count drops to zero the buffer is

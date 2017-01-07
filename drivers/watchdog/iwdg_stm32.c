@@ -27,6 +27,8 @@
 
 #include <watchdog.h>
 #include <soc.h>
+#include <errno.h>
+
 #include "iwdg_stm32.h"
 
 #define AS_IWDG(__base_addr) \
@@ -74,7 +76,7 @@ static void iwdg_stm32_reload(struct device *dev)
 	iwdg->kr.bit.key = STM32_IWDG_KR_RELOAD;
 }
 
-static struct wdt_driver_api iwdg_stm32_api = {
+static const struct wdt_driver_api iwdg_stm32_api = {
 	.enable = iwdg_stm32_enable,
 	.disable = iwdg_stm32_disable,
 	.get_config = iwdg_stm32_get_config,
@@ -120,5 +122,5 @@ static int iwdg_stm32_init(struct device *dev)
 
 DEVICE_AND_API_INIT(iwdg_stm32, CONFIG_IWDG_STM32_DEVICE_NAME, iwdg_stm32_init,
 		    NULL, NULL,
-		    PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &iwdg_stm32_api);

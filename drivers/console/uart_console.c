@@ -23,7 +23,7 @@
  * Hooks into the printk and fputc (for printf) modules. Poll driven.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 
 #include <stdio.h>
@@ -45,6 +45,13 @@
 static struct device *uart_console_dev;
 
 #ifdef CONFIG_UART_CONSOLE_DEBUG_SERVER_HOOKS
+
+static uart_console_in_debug_hook_t debug_hook_in;
+void uart_console_in_debug_hook_install(uart_console_in_debug_hook_t hook)
+{
+	debug_hook_in = hook;
+}
+
 static UART_CONSOLE_OUT_DEBUG_HOOK_SIG(debug_hook_out_nop)
 {
 	ARG_UNUSED(c);
@@ -58,8 +65,7 @@ void uart_console_out_debug_hook_install(uart_console_out_debug_hook_t *hook)
 }
 #define HANDLE_DEBUG_HOOK_OUT(c) \
 	(debug_hook_out(c) == UART_CONSOLE_DEBUG_HOOK_HANDLED)
-#else
-#define HANDLE_DEBUG_HOOK_OUT(c) 0
+
 #endif /* CONFIG_UART_CONSOLE_DEBUG_SERVER_HOOKS */
 
 #if 0 /* NOTUSED */
@@ -95,11 +101,15 @@ static int console_in(void)
 
 static int console_out(int c)
 {
+#ifdef CONFIG_UART_CONSOLE_DEBUG_SERVER_HOOKS
+
 	int handled_by_debug_server = HANDLE_DEBUG_HOOK_OUT(c);
 
 	if (handled_by_debug_server) {
 		return c;
 	}
+
+#endif /* CONFIG_UART_CONSOLE_DEBUG_SERVER_HOOKS */
 
 	if ('\n' == c) {
 		uart_poll_out(uart_console_dev, '\r');
@@ -128,8 +138,8 @@ extern void __printk_hook_install(int (*fn)(int));
 #endif
 
 #if defined(CONFIG_CONSOLE_HANDLER)
-static struct nano_fifo *avail_queue;
-static struct nano_fifo *lines_queue;
+static struct k_fifo *avail_queue;
+static struct k_fifo *lines_queue;
 static uint8_t (*completion_cb)(char *line, uint8_t len);
 
 /* Control characters */
@@ -142,6 +152,9 @@ static uint8_t (*completion_cb)(char *line, uint8_t len);
 #define ANSI_DOWN          'B'
 #define ANSI_FORWARD       'C'
 #define ANSI_BACKWARD      'D'
+#define ANSI_END           'F'
+#define ANSI_HOME          'H'
+#define ANSI_DEL           '~'
 
 static int read_uart(struct device *uart, uint8_t *buf, unsigned int size)
 {
@@ -241,7 +254,7 @@ static atomic_t esc_state;
 static unsigned int ansi_val, ansi_val_2;
 static uint8_t cur, end;
 
-static void handle_ansi(uint8_t byte)
+static void handle_ansi(uint8_t byte, char *line)
 {
 	if (atomic_test_and_clear_bit(&esc_state, ESC_ANSI_FIRST)) {
 		if (!isdigit(byte)) {
@@ -297,6 +310,32 @@ ansi_cmd:
 		cur += ansi_val;
 		cursor_forward(ansi_val);
 		break;
+	case ANSI_HOME:
+		if (!cur) {
+			break;
+		}
+
+		cursor_backward(cur);
+		end += cur;
+		cur = 0;
+		break;
+	case ANSI_END:
+		if (!end) {
+			break;
+		}
+
+		cursor_forward(end);
+		cur += end;
+		end = 0;
+		break;
+	case ANSI_DEL:
+		if (!end) {
+			break;
+		}
+
+		cursor_forward(1);
+		del_char(&line[cur], --end);
+		break;
 	default:
 		break;
 	}
@@ -325,23 +364,25 @@ void uart_console_isr(struct device *unused)
 			return;
 		}
 
-		if (uart_irq_input_hook(uart_console_dev, byte) != 0) {
+#ifdef CONFIG_UART_CONSOLE_DEBUG_SERVER_HOOKS
+		if (debug_hook_in != NULL && debug_hook_in(byte) != 0) {
 			/*
 			 * The input hook indicates that no further processing
 			 * should be done by this handler.
 			 */
 			return;
 		}
+#endif
 
 		if (!cmd) {
-			cmd = nano_isr_fifo_get(avail_queue, TICKS_NONE);
+			cmd = k_fifo_get(avail_queue, K_NO_WAIT);
 			if (!cmd)
 				return;
 		}
 
 		/* Handle ANSI escape mode */
 		if (atomic_test_bit(&esc_state, ESC_ANSI)) {
-			handle_ansi(byte);
+			handle_ansi(byte, cmd->line);
 			continue;
 		}
 
@@ -376,7 +417,7 @@ void uart_console_isr(struct device *unused)
 				uart_poll_out(uart_console_dev, '\n');
 				cur = 0;
 				end = 0;
-				nano_isr_fifo_put(lines_queue, cmd);
+				k_fifo_put(lines_queue, cmd);
 				cmd = NULL;
 				break;
 			case '\t':
@@ -415,7 +456,7 @@ static void console_input_init(void)
 	uart_irq_rx_enable(uart_console_dev);
 }
 
-void uart_register_input(struct nano_fifo *avail, struct nano_fifo *lines,
+void uart_register_input(struct k_fifo *avail, struct k_fifo *lines,
 			 uint8_t (*completion)(char *str, uint8_t len))
 {
 	avail_queue = avail;
@@ -455,9 +496,22 @@ void uart_console_hook_install(void)
  */
 static int uart_console_init(struct device *arg)
 {
+
 	ARG_UNUSED(arg);
 
 	uart_console_dev = device_get_binding(CONFIG_UART_CONSOLE_ON_DEV_NAME);
+
+#ifdef CONFIG_USB_UART_CONSOLE
+	while (1) {
+		uint32_t dtr = 0;
+
+		uart_line_ctrl_get(uart_console_dev, LINE_CTRL_DTR, &dtr);
+		if (dtr) {
+			break;
+		}
+	}
+	k_busy_wait(1000000);
+#endif
 
 	uart_console_hook_install();
 
@@ -466,9 +520,11 @@ static int uart_console_init(struct device *arg)
 
 /* UART console initializes after the UART device itself */
 SYS_INIT(uart_console_init,
-#if defined(CONFIG_EARLY_CONSOLE)
-			PRIMARY,
+#if defined(CONFIG_USB_UART_CONSOLE)
+			APPLICATION,
+#elif defined(CONFIG_EARLY_CONSOLE)
+			PRE_KERNEL_1,
 #else
-			SECONDARY,
+			POST_KERNEL,
 #endif
 			CONFIG_UART_CONSOLE_INIT_PRIORITY);

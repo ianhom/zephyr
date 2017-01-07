@@ -24,7 +24,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <misc/printk.h>
 #include <misc/__assert.h>
 #include "soc.h"
@@ -37,7 +37,7 @@
 	(*((volatile uint32_t *)(SCSS_REGISTER_BASE+offset)))
 
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_ARC_INIT_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 /**
  *
@@ -85,7 +85,7 @@ static int arc_init(struct device *arg)
 	/* Block until ARC's quark_se_init() sets a flag indicating it is ready,
 	 * if we get stuck here ARC has run but has exploded very early */
 	SYS_LOG_DBG("Waiting for arc to init...");
-	while (!shared_data->flags & ARC_READY) {
+	while (!(shared_data->flags & ARC_READY)) {
 	}
 
 skip_arc_init:
@@ -93,7 +93,7 @@ skip_arc_init:
 	return 0;
 }
 
-SYS_INIT(arc_init, SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(arc_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 #endif /*CONFIG_ARC_INIT*/
 

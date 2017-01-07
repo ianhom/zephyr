@@ -18,7 +18,7 @@
  * @brief Driver for Nordic Semiconductor nRF5X UART
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <misc/__assert.h>
 #include <board.h>
@@ -26,6 +26,22 @@
 #include <uart.h>
 #include <sections.h>
 #include <gpio.h>
+
+#ifdef CONFIG_SOC_NRF52840
+/* Undefine MDK-defined macros */
+#ifdef PSELRTS
+#undef PSELRTS
+#endif
+#ifdef PSELCTS
+#undef PSELCTS
+#endif
+#ifdef PSELTXD
+#undef PSELTXD
+#endif
+#ifdef PSELRXD
+#undef PSELRXD
+#endif
+#endif
 
 /* UART structure for nRF5X. More detailed description of each register can be found in nrf5X.h */
 struct _uart {
@@ -92,7 +108,7 @@ struct uart_nrf5_dev_data_t {
 #define UART_IRQ_MASK_TX	(1 << 3)
 #define UART_IRQ_MASK_ERROR	(1 << 4)
 
-static struct uart_driver_api uart_nrf5_driver_api;
+static const struct uart_driver_api uart_nrf5_driver_api;
 
 /**
  * @brief Set the baud rate
@@ -106,24 +122,70 @@ static struct uart_driver_api uart_nrf5_driver_api;
  * @return N/A
  */
 
-static void baudrate_set(struct device *dev,
+static int baudrate_set(struct device *dev,
 			 uint32_t baudrate, uint32_t sys_clk_freq_hz)
 {
 	volatile struct _uart *uart = UART_STRUCT(dev);
 
-	uint32_t set_baudrate; /* baud rate divisor */
+	uint32_t divisor; /* baud rate divisor */
 
-	if ((baudrate != 0) && (sys_clk_freq_hz != 0)) {
-		set_baudrate = (uint32_t) (
-					  (uint64_t)baudrate *
-					  (uint64_t)UINT32_MAX /
-					  (uint64_t)sys_clk_freq_hz
-		);
-
-		/* Round the value */
-		set_baudrate = (set_baudrate + 0x800) & 0xFFFFF000;
-		uart->BAUDRATE = set_baudrate << UART_BAUDRATE_BAUDRATE_Pos;
+	/* Use the common nRF5 macros */
+	switch (baudrate) {
+	case 1200:
+		divisor = NRF5_UART_BAUDRATE_1200;
+		break;
+	case 2400:
+		divisor = NRF5_UART_BAUDRATE_2400;
+		break;
+	case 4800:
+		divisor = NRF5_UART_BAUDRATE_4800;
+		break;
+	case 9600:
+		divisor = NRF5_UART_BAUDRATE_9600;
+		break;
+	case 14400:
+		divisor = NRF5_UART_BAUDRATE_14400;
+		break;
+	case 19200:
+		divisor = NRF5_UART_BAUDRATE_19200;
+		break;
+	case 28800:
+		divisor = NRF5_UART_BAUDRATE_28800;
+		break;
+	case 38400:
+		divisor = NRF5_UART_BAUDRATE_38400;
+		break;
+	case 57600:
+		divisor = NRF5_UART_BAUDRATE_57600;
+		break;
+	case 76800:
+		divisor = NRF5_UART_BAUDRATE_76800;
+		break;
+	case 115200:
+		divisor = NRF5_UART_BAUDRATE_115200;
+		break;
+	case 230400:
+		divisor = NRF5_UART_BAUDRATE_230400;
+		break;
+	case 250000:
+		divisor = NRF5_UART_BAUDRATE_250000;
+		break;
+	case 460800:
+		divisor = NRF5_UART_BAUDRATE_460800;
+		break;
+	case 921600:
+		divisor = NRF5_UART_BAUDRATE_921600;
+		break;
+	case 1000000:
+		divisor = NRF5_UART_BAUDRATE_1000000;
+		break;
+	default:
+		return -EINVAL;
 	}
+
+	uart->BAUDRATE = divisor << UART_BAUDRATE_BAUDRATE_Pos;
+
+	return 0;
 }
 
 /**
@@ -140,6 +202,7 @@ static int uart_nrf5_init(struct device *dev)
 {
 	volatile struct _uart *uart = UART_STRUCT(dev);
 	struct device *gpio_dev;
+	int err;
 
 	gpio_dev = device_get_binding(CONFIG_GPIO_NRF5_P0_DEV_NAME);
 	(void) gpio_pin_configure(gpio_dev,
@@ -156,7 +219,7 @@ static int uart_nrf5_init(struct device *dev)
 
 	(void) gpio_pin_configure(gpio_dev,
 				  CONFIG_UART_NRF5_GPIO_RTS_PIN,
-				  (GPIO_DIR_OUT | GPIO_PUD_PULL_UP));
+				  (GPIO_DIR_OUT));
 	(void) gpio_pin_configure(gpio_dev,
 				  CONFIG_UART_NRF5_GPIO_CTS_PIN,
 				  (GPIO_DIR_IN));
@@ -170,8 +233,11 @@ static int uart_nrf5_init(struct device *dev)
 	DEV_DATA(dev)->baud_rate = CONFIG_UART_NRF5_BAUD_RATE;
 
 	/* Set baud rate */
-	baudrate_set(dev, DEV_DATA(dev)->baud_rate,
+	err = baudrate_set(dev, DEV_DATA(dev)->baud_rate,
 		     DEV_CFG(dev)->sys_clk_freq);
+	if (err) {
+		return err;
+	}
 
 	/* Enable receiver and transmitter */
 	uart->ENABLE = (UART_ENABLE_ENABLE_Enabled << UART_ENABLE_ENABLE_Pos);
@@ -412,7 +478,7 @@ void uart_nrf5_isr(void *arg)
 }
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-static struct uart_driver_api uart_nrf5_driver_api = {
+static const struct uart_driver_api uart_nrf5_driver_api = {
 	.poll_in          = uart_nrf5_poll_in,          /** Console I/O function */
 	.poll_out         = uart_nrf5_poll_out,         /** Console I/O function */
 	.err_check        = uart_nrf5_err_check,        /** Console I/O function */
@@ -439,7 +505,7 @@ static struct uart_driver_api uart_nrf5_driver_api = {
 static void uart_nrf5_irq_config(struct device *port);
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-static struct uart_device_config uart_nrf5_dev_cfg_0 = {
+static const struct uart_device_config uart_nrf5_dev_cfg_0 = {
 	.base = (uint8_t *)NRF_UART0_BASE,
 	.sys_clk_freq = CONFIG_UART_NRF5_CLK_FREQ,
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
@@ -453,16 +519,16 @@ static struct uart_nrf5_dev_data_t uart_nrf5_dev_data_0 = {
 
 DEVICE_INIT(uart_nrf5_0, CONFIG_UART_NRF5_NAME, &uart_nrf5_init,
 	    &uart_nrf5_dev_data_0, &uart_nrf5_dev_cfg_0,
-	    PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
+	    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
 
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 static void uart_nrf5_irq_config(struct device *port)
 {
-	IRQ_CONNECT(NRF52_IRQ_UARTE0_UART0_IRQn,
+	IRQ_CONNECT(NRF5_IRQ_UART0_IRQn,
 		    CONFIG_UART_NRF5_IRQ_PRI,
 		    uart_nrf5_isr, DEVICE_GET(uart_nrf5_0),
 		    0);
-	irq_enable(NRF52_IRQ_UARTE0_UART0_IRQn);
+	irq_enable(NRF5_IRQ_UART0_IRQn);
 }
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */

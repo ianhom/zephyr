@@ -16,7 +16,7 @@
 
 /**
  * @file
- * @brief ARM CORTEX-M3 exception/interrupt exit API
+ * @brief ARM CORTEX-M exception/interrupt exit API
  *
  *
  * Provides functions for performing kernel handling when exiting exceptions or
@@ -26,8 +26,8 @@
 
 #define _ASMLANGUAGE
 
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 #include <toolchain.h>
 #include <arch/cpu.h>
 
@@ -35,21 +35,7 @@ _ASM_FILE_PROLOGUE
 
 GTEXT(_ExcExit)
 GTEXT(_IntExit)
-GDATA(_nanokernel)
-
-#ifdef CONFIG_KERNEL_V2
-GTEXT(_is_next_thread_current)
-#endif
-
-#if CONFIG_GDB_INFO
-  #define _EXIT_EXC_IF_FIBER_PREEMPTED beq _ExcExitWithGdbStub
-#else
-  _EXIT_EXC_IF_FIBER_PREEMPTED:      .macro
-                                     it eq
-                                     bxeq lr
-                                     .endm
-#endif
-#define _EXIT_EXC_IF_FIBER_NOT_READY _EXIT_EXC_IF_FIBER_PREEMPTED
+GDATA(_kernel)
 
 /**
  *
@@ -94,44 +80,24 @@ SECTION_SUBSEC_FUNC(TEXT, _HandlerModeExit, _IntExit)
 
 SECTION_SUBSEC_FUNC(TEXT, _HandlerModeExit, _ExcExit)
 
-    ldr r1, =_nanokernel
+#ifdef CONFIG_PREEMPT_ENABLED
+    ldr r0, =_kernel
 
-#ifdef CONFIG_KERNEL_V2
-	ldr r1, [r1, #__tNANO_current_OFFSET]
+    ldr r1, [r0, #_kernel_offset_to_current]
+    ldr r2, [r1, #_thread_offset_to_prio]
+    ldr r3, [r1, #_thread_offset_to_sched_locked]
 
-	ldr r2, [r1, #__tTCS_prio_OFFSET]
-	ldr r3, [r1, #__tTCS_sched_locked_OFFSET]
-
-	/* coop thread ? do not schedule */
-	cmp r2, #0
-	it lt
-	  bxlt lr
-
-	/* scheduler locked ? do not schedule */
-	cmp r3, #0
-	it gt
-	  bxgt lr
-
-	push {lr}
-	blx _is_next_thread_current
-	pop {lr}
-	cmp r0, #0
-	it ne
-	  bxne lr
-
-#else
-
-    /* is the current thread preemptible (task) ? */
-    ldr r2, [r1, #__tNANO_flags_OFFSET]
-    ands.w r2, #PREEMPTIBLE
-    _EXIT_EXC_IF_FIBER_PREEMPTED
-
-    /* is there a fiber ready ? */
-    ldr r2, [r1, #__tNANO_fiber_OFFSET]
+    /* coop thread ? do not schedule */
     cmp r2, #0
-    _EXIT_EXC_IF_FIBER_NOT_READY
+    blt _EXIT_EXC
 
-#endif
+    /* scheduler locked ? do not schedule */
+    cmp r3, #0
+    bne _EXIT_EXC
+
+    ldr r0, [r0, _kernel_offset_to_ready_q_cache]
+    cmp r0, r1
+    beq _EXIT_EXC
 
     /* context switch required, pend the PendSV exception */
     ldr r1, =_SCS_ICSR
@@ -140,6 +106,7 @@ SECTION_SUBSEC_FUNC(TEXT, _HandlerModeExit, _ExcExit)
 
 _ExcExitWithGdbStub:
 
-    _GDB_STUB_EXC_EXIT
+_EXIT_EXC:
+#endif /* CONFIG_PREEMPT_ENABLED */
 
     bx lr

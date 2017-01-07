@@ -40,8 +40,8 @@
 #include <device.h>
 #include <aio_comparator.h>
 
-/* specify delay between greetings (in ms); compute equivalent in ticks */
-#define SLEEPTIME  SECONDS(5)
+/* specify delay between greetings (in ms) */
+#define SLEEPTIME  5000
 
 struct cb_data_t {
 	uint8_t ain_idx;
@@ -50,28 +50,28 @@ struct cb_data_t {
 	char name[50];
 };
 
-struct cb_data_t cb_data = {
+static struct cb_data_t cb_data = {
 	.ain_idx = 10,
 	.ref = AIO_CMP_REF_A,
 	.pol = AIO_CMP_POL_RISE,
 	.name = "A0, AIN[10]",
 };
 
-void cb(void *param)
+static void cb(void *param)
 {
 	struct device *aio_cmp_dev;
 	struct cb_data_t *p = (struct cb_data_t *)param;
 
 	aio_cmp_dev = device_get_binding("AIO_CMP_0");
 
-	printf("*** %s triggered %s.\n", &p->name,
-	      (p->pol == AIO_CMP_POL_RISE) ? "rising" : "falling"
-	);
+	printf("*** %s triggered %s.\n", p->name,
+	       (p->pol == AIO_CMP_POL_RISE) ? "rising" : "falling");
 
-	if (p->pol == AIO_CMP_POL_RISE)
+	if (p->pol == AIO_CMP_POL_RISE) {
 		p->pol = AIO_CMP_POL_FALL;
-	else
+	} else {
 		p->pol = AIO_CMP_POL_RISE;
+	}
 
 	aio_cmp_configure(aio_cmp_dev, p->ain_idx, p->pol, p->ref, cb, p);
 }
@@ -81,12 +81,12 @@ void main(void)
 	struct device *aio_cmp_dev;
 	int i, ret;
 	int cnt = 0;
-	uint32_t timer_data[2] = {0, 0};
-	struct nano_timer timer;
-
-	nano_timer_init(&timer, timer_data);
 
 	aio_cmp_dev = device_get_binding("AIO_CMP_0");
+	if (!aio_cmp_dev) {
+		printf("AIO device driver not found\n");
+		return;
+	}
 
 	printf("===== app started ========\n");
 
@@ -95,17 +95,17 @@ void main(void)
 		ret = aio_cmp_configure(aio_cmp_dev, cb_data.ain_idx,
 					cb_data.pol, cb_data.ref,
 					cb, &cb_data);
-		if (ret)
+		if (ret) {
 			printf("ERROR registering callback for %s (%d)\n",
-			      &cb_data.name, ret);
+			       cb_data.name, ret);
+		}
 	}
 
 	while (1) {
 		printf("... waiting for event! (%d)\n", ++cnt);
 
 		/* wait a while */
-		nano_task_timer_start(&timer, SLEEPTIME);
-		nano_task_timer_test(&timer, TICKS_UNLIMITED);
+		k_sleep(SLEEPTIME);
 	}
 }
 

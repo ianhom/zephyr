@@ -78,7 +78,7 @@ struct regval_map {
 	int reg;
 };
 
-int map_reg_val(const struct regval_map *map, size_t cnt, int val)
+static int map_reg_val(const struct regval_map *map, size_t cnt, int val)
 {
 	for (int i = 0; i < cnt; i++) {
 		if (map[i].val == val) {
@@ -149,7 +149,7 @@ static int __pllmul(int mul)
 #endif	/* CONFIG_CLOCK_STM32F10X_PLL_MULTIPLIER */
 
 
-uint32_t __get_ahb_clock(uint32_t sysclk)
+static uint32_t __get_ahb_clock(uint32_t sysclk)
 {
 	/* AHB clock is generated based on SYSCLK  */
 	uint32_t sysclk_div = CONFIG_CLOCK_STM32F10X_AHB_PRESCALER;
@@ -160,7 +160,7 @@ uint32_t __get_ahb_clock(uint32_t sysclk)
 	return sysclk / sysclk_div;
 }
 
-uint32_t __get_apb_clock(uint32_t ahb_clock, uint32_t prescaler)
+static uint32_t __get_apb_clock(uint32_t ahb_clock, uint32_t prescaler)
 {
 	if (prescaler == 0) {
 		prescaler = 1;
@@ -191,7 +191,7 @@ static int stm32f10x_clock_control_get_subsys_rate(struct device *clock,
 	return 0;
 }
 
-static struct clock_control_driver_api stm32f10x_clock_control_api = {
+static const struct clock_control_driver_api stm32f10x_clock_control_api = {
 	.on = stm32f10x_clock_control_on,
 	.off = stm32f10x_clock_control_off,
 	.get_rate = stm32f10x_clock_control_get_subsys_rate,
@@ -205,7 +205,7 @@ static struct clock_control_driver_api stm32f10x_clock_control_api = {
 static inline void __setup_flash(void)
 {
 	volatile struct stm32f10x_flash *flash =
-		(struct stm32f10x_flash *)(FLASH_BASE);
+		(struct stm32f10x_flash *)(FLASH_R_BASE);
 
 	if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC <= 24000000) {
 		flash->acr.bit.latency = STM32F10X_FLASH_LATENCY_0;
@@ -216,7 +216,7 @@ static inline void __setup_flash(void)
 	}
 }
 
-int stm32f10x_clock_control_init(struct device *dev)
+static int stm32f10x_clock_control_init(struct device *dev)
 {
 	struct stm32f10x_rcc_data *data = dev->driver_data;
 	volatile struct stm32f10x_rcc *rcc =
@@ -325,6 +325,6 @@ static struct stm32f10x_rcc_data stm32f10x_rcc_data = {
 DEVICE_AND_API_INIT(rcc_stm32f10x, STM32_CLOCK_CONTROL_NAME,
 		    &stm32f10x_clock_control_init,
 		    &stm32f10x_rcc_data, NULL,
-		    PRIMARY,
+		    PRE_KERNEL_1,
 		    CONFIG_CLOCK_CONTROL_STM32F10X_DEVICE_INIT_PRIORITY,
 		    &stm32f10x_clock_control_api);

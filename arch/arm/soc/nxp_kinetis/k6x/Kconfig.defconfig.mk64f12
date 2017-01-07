@@ -22,89 +22,27 @@ config SOC
 	string
 	default mk64f12
 
-if UART_K20
+if PINMUX
 
-config UART_K20_PORT_0
+config PINMUX_KSDK
 	def_bool y
 
-if UART_K20_PORT_0
-config UART_K20_PORT_0_IRQ_PRI
-	default 3
-config UART_K20_PORT_0_BAUD_RATE
-	default 115200
-endif
+endif # PINMUX
 
-config UART_K20_PORT_1
+if PINMUX_DEV
+
+config PINMUX_DEV_KSDK
 	def_bool y
 
-if UART_K20_PORT_1
-config UART_K20_PORT_1_IRQ_PRI
-	default 3
-config UART_K20_PORT_1_BAUD_RATE
-	default 115200
-endif
-
-config UART_K20_PORT_2
-	def_bool y
-if UART_K20_PORT_2
-config UART_K20_PORT_2_IRQ_PRI
-	default 3
-config UART_K20_PORT_2_BAUD_RATE
-	default 115200
-endif
-
-config UART_K20_PORT_3
-	def_bool y
-if UART_K20_PORT_3
-config UART_K20_PORT_3_IRQ_PRI
-	default 3
-config UART_K20_PORT_3_BAUD_RATE
-	default 115200
-endif
-
-config UART_K20_PORT_4
-	def_bool y
-if UART_K20_PORT_4
-config UART_K20_PORT_4_IRQ_PRI
-	default 3
-config UART_K20_PORT_4_BAUD_RATE
-	default 115200
-endif
-
-endif # UART_K20
-
-config BLUETOOTH_UART_ON_DEV_NAME
-	default "UART_1" if BLUETOOTH_UART
+endif # PINMUX_DEV
 
 config GPIO
-	def_bool y
-
-config PINMUX
 	def_bool y
 
 if GPIO
 
 config GPIO_K64
 	def_bool y
-
-if GPIO_K64
-
-config GPIO_K64_A
-	def_bool y
-
-config GPIO_K64_B
-	def_bool y
-
-config GPIO_K64_C
-	def_bool y
-
-config GPIO_K64_D
-	def_bool y
-
-config GPIO_K64_E
-	def_bool y
-
-endif # GPIO_K64
 
 endif # GPIO
 
@@ -113,69 +51,14 @@ if I2C
 config I2C_KSDK
 	def_bool y
 
-config I2C_0
-	def_bool y
-
-if I2C_0
-
-config I2C_0_DEFAULT_CFG
-	default 0x12
-
-config I2C_0_IRQ_PRI
-	default 0
-
-endif # I2C_0
-
-config I2C_1
-	def_bool n
-
-if I2C_1
-
-config I2C_1_DEFAULT_CFG
-	default 0x12
-
-config I2C_1_IRQ_PRI
-	default 0
-
-endif # I2C_1
-
 endif # I2C
-
-if PINMUX
-
-config PINMUX_K64
-	def_bool y
-
-if PINMUX_K64
-
-config PINMUX_K64_GPIO_A_NAME
-	default GPIO_K64_A_DEV_NAME
-config PINMUX_K64_GPIO_B_NAME
-	default GPIO_K64_B_DEV_NAME
-config PINMUX_K64_GPIO_C_NAME
-	default GPIO_K64_C_DEV_NAME
-config PINMUX_K64_GPIO_D_NAME
-	default GPIO_K64_D_DEV_NAME
-config PINMUX_K64_GPIO_E_NAME
-	default GPIO_K64_E_DEV_NAME
-
-endif # PINMUX_K64
-
-endif # PINMUX
 
 if PWM
 
 config PWM_K64_FTM
 	def_bool y
 
-if PWM_K64_FTM
-
-config PWM_K64_FTM_0
-	def_bool y
-
-endif # PWM_K64_FTM
-
-endif
+endif # PWM
 
 config SPI
 	def_bool n
@@ -185,28 +68,27 @@ if SPI
 config SPI_K64
 	def_bool y
 
-if SPI_K64
+endif # SPI
 
-config SPI_0
+if NET_L2_ETHERNET
+
+config ETH_KSDK
 	def_bool y
 
-config SPI_0_IRQ_PRI
-	default 3
+endif # NET_L2_ETHERNET
 
-config SPI_1
-	def_bool n
+if RANDOM_GENERATOR
 
-config SPI_1_IRQ_PRI
-	default 3
+config RANDOM_KSDK
+	def_bool y
 
-config SPI_2
-	def_bool n
+endif # RANDOM_GENERATOR
 
-config SPI_2_IRQ_PRI
-	default 3
+if FLASH
 
-endif # SPI_K64
+config SOC_FLASH_KSDK
+	def_bool y
 
-endif # SPI
+endif # FLASH
 
 endif # SOC_MK64F12

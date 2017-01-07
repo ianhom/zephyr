@@ -18,12 +18,7 @@
 
 menu "Compile and Link Features"
 
-config KERNEL_BIN_NAME
-	string "The kernel binary name"
-	default "zephyr"
-	help
-	This option sets the name of the generated kernel binary.
-
+menu "Linker Options"
 config TEXT_SECTION_OFFSET
 	hex "TEXT section offset"
 	default 0
@@ -53,22 +48,26 @@ config CUSTOM_LINKER_SCRIPT
 	linker script and avoid having to change the script provided by
 	Zephyr.
 
-config CROSS_COMPILE
-	string "Cross-compiler tool prefix"
-	help
-	Same as running 'make CROSS_COMPILE=prefix-' but stored for
-	default make runs in this kernel build directory.  You don't
-	need to set this unless you want the configured kernel build
-	directory to select the cross-compiler automatically.
-
-config GDB_INFO
-	bool
-	prompt "Task-aware debugging with GDB"
+config CUSTOM_RODATA_LD
+	bool "Include custom-rodata.ld"
 	default n
 	help
-	  This option enables the kernel to collect additional information
-	  during interrupts, exceptions, and context switches. This information
-	  is required for task-aware debugging with GDB.
+	Include a customized linker script fragment for inserting additional
+	data and linker directives into the rodata section.
+
+config CUSTOM_RWDATA_LD
+	bool "Include custom-rwdata.ld"
+	default n
+	help
+	Include a customized linker script fragment for inserting additional
+	data and linker directives into the data section.
+
+config CUSTOM_SECTIONS_LD
+	bool "Include custom-sections.ld"
+	default n
+	help
+	Include a customized linker script fragment for inserting additional
+	arbitrary sections.
 
 config LINK_WHOLE_ARCHIVE
 	bool "Allow linking with --whole-archive"
@@ -76,6 +75,17 @@ config LINK_WHOLE_ARCHIVE
 	help
 	This options allows linking external libraries with the
 	--whole-archive option to keep all symbols.
+
+endmenu
+
+menu "Compiler Options"
+config CROSS_COMPILE
+	string "Cross-compiler tool prefix"
+	help
+	Same as running 'make CROSS_COMPILE=prefix-' but stored for
+	default make runs in this kernel build directory.  You don't
+	need to set this unless you want the configured kernel build
+	directory to select the cross-compiler automatically.
 
 config COMPILER_OPT
 	string
@@ -95,48 +105,28 @@ config TOOLCHAIN_VARIANT
 	For optimized compilers with reduced features, specify the name
 	of the variant.
 
+endmenu
+
 config CPLUSPLUS
 	bool "Enable C++ support for the application"
 	default n
 	help
 	This option enables the use of applications built with C++.
 
-choice
-prompt "C Library"
-default MINIMAL_LIBC
-
-config MINIMAL_LIBC
+config GDB_INFO
 	bool
-	prompt "Build minimal c library"
-	help
-	Build integrated minimal c library. This integrated library is available
-	to support kernel functionality and test cases. It is not designed to be
-	used with applications. For applications, please use an external C
-	library such as newlib.
-
-config NEWLIB_LIBC
-	bool
-	prompt "Build with newlib c library"
-	help
-	Build with newlib library. The newlib library is expected to be
-	part of the SDK in this case.
-
-endchoice
-
-
-config MINIMAL_LIBC_EXTENDED
-	bool "Build additional libc functions [EXPERIMENTAL]"
+	prompt "Task-aware debugging with GDB"
 	default n
-	depends on MINIMAL_LIBC
 	help
-	This option enables building some optional libc functions that
-	are not used directly by the kernel but can be used in applications.
-	The option adds the following functions: strtoul, strtol, atoi,
-	strncasecmp.
-	Warning: Use the above functions only for testing, if you need to
-	use any of the functions in an application you probably should be
-	linking against a full lib c implementation instead.
+	  This option enables the kernel to collect additional information
+	  during interrupts, exceptions, and context switches. This information
+	  is required for task-aware debugging with GDB.
 
+config KERNEL_BIN_NAME
+	string "The kernel binary name"
+	default "zephyr"
+	help
+	This option sets the name of the generated kernel binary.
 
 endmenu
 
@@ -149,15 +139,6 @@ config DEBUG
 	Build a kernel suitable for debugging.  Right now, this option
 	only disables optimization, more debugging variants can be selected
 	from here to allow more debugging.
-
-config TASK_DEBUG
-	bool
-	prompt "Task debugging [EXPERIMENTAL]"
-	default n
-	help
-	This option allows execution of all tasks (with the exception of
-	essential system tasks) to be suspended so that debugging operations
-	can be performed.
 
 config STACK_USAGE
 	bool "Generate stack usage information"
@@ -221,12 +202,19 @@ config ASSERT_LEVEL
 	Level 2: on + no warning
 
 config DEBUG_TRACING_KERNEL_OBJECTS
+	bool "Kernel object tracing (deprecated)"
+	select OBJECT_TRACING
+	default n
+	help
+	  For backward compatibility only
+
+config OBJECT_TRACING
 	bool
-	prompt "Debug tracing object"
+	prompt "Kernel object tracing"
 	default n
 	help
 	This option enable the feature for tracing kernel objects. This option
-	is for debug purposes and increase the memory footprint of the kernel.
+	is for debug purposes and increases the memory footprint of the kernel.
 
 config OMIT_FRAME_POINTER
 	bool
@@ -241,72 +229,6 @@ config OMIT_FRAME_POINTER
 	harder to locate and it is much more difficult to produce a stack
 	trace. Recommended only for production builds which do not need to be
 	debugged.
-
-source "misc/debug/Kconfig"
-
-endmenu
-
-menu "Logging Options"
-
-config SYS_LOG
-	bool
-	prompt "Enable Logging"
-	depends on PRINTK || STDOUT_CONSOLE
-	default n
-	help
-	  Global switch for logging, when turned off log calls will not be
-	  executed.
-
-config SYS_LOG_SHOW_TAGS
-	bool
-	prompt "Prepend level tags to logs"
-	depends on SYS_LOG
-	default y
-	help
-	  Prefixes all log lines with an identifier to the log level submitted in
-	  the C code.
-
-config SYS_LOG_SHOW_COLOR
-	bool
-	prompt "Use colored logs"
-	depends on SYS_LOG
-	default n
-	help
-	  Use color in the logs. This requires an ANSI capable terminal.
-
-config SYS_LOG_DEFAULT_LEVEL
-	int
-	prompt "Default log level"
-	depends on SYS_LOG
-	default 0
-	range 0 4
-	help
-	  Sets log level for modules which don't specify it explicitly. When
-	  set to 0 it means log wont be activated for those modules.
-	  Levels are:
-	  0 OFF, do not write by default
-	  1 ERROR, default to only write SYS_LOG_ERR
-	  2 WARNING, default to write SYS_LOG_WRN in adition to previous level
-	  3 INFO, default to write SYS_LOG_INF in adition to previous levels
-	  4 DEBUG, default to write SYS_LOG_DBG in adition to previous levels
-
-config SYS_LOG_OVERRIDE_LEVEL
-	int
-	prompt "Override lowest log level"
-	depends on SYS_LOG
-	default 0
-	range 0 4
-	help
-	  Forces a minimum log level for all modules. Modules use their
-	  specified level if it is greater than this option, otherwise they use
-	  the level specified by this option instead of their default or
-	  whatever was manually set.
-	  Levels are:
-	  0 OFF, do not override
-	  1 ERROR, override to write SYS_LOG_ERR
-	  2 WARNING, override to write SYS_LOG_WRN in adition to previous level
-	  3 INFO, override to write SYS_LOG_INF in adition to previous levels
-	  4 DEBUG, override to write SYS_LOG_DBG in adition to previous levels
 
 endmenu
 
@@ -381,6 +303,16 @@ config BOOTLOADER_UNKNOWN
 	or that it supports multiple ways of booting and it isn't clear
 	at build time which method is to be used. When this option is enabled
 	the board may have to do extra work to ensure a proper startup.
+
+config BOOTLOADER_CONTEXT_RESTORE
+	bool
+	prompt "Boot loader has context restore support"
+	default y
+	depends on SYS_POWER_DEEP_SLEEP && BOOTLOADER_CONTEXT_RESTORE_SUPPORTED
+	help
+	This option signifies that the target has a bootloader
+	that restores CPU context upon resuming from deep sleep
+	power state.
 
 config REBOOT
 	bool "Reboot functionality"

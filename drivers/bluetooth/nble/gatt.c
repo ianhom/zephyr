@@ -39,12 +39,11 @@
 
 #if CONFIG_BLUETOOTH_ATT_PREPARE_COUNT > 0
 /* Pool for incoming ATT packets */
-static struct nano_fifo prep_data;
-static NET_BUF_POOL(prep_pool, CONFIG_BLUETOOTH_ATT_PREPARE_COUNT,
-		    BLE_GATT_MTU_SIZE, &prep_data, NULL,
-		    sizeof(struct nble_gatts_write_evt));
+NET_BUF_POOL_DEFINE(prep_pool, CONFIG_BLUETOOTH_ATT_PREPARE_COUNT,
+		    BLE_GATT_MTU_SIZE, sizeof(struct nble_gatts_write_evt),
+		    NULL);
 
-static struct nano_fifo queue;
+static K_FIFO_DEFINE(queue);
 #endif
 
 struct nble_gatt_service {
@@ -387,7 +386,8 @@ ssize_t bt_gatt_attr_read_ccc(struct bt_conn *conn,
 	return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
 }
 
-static void gatt_ccc_changed(struct _bt_gatt_ccc *ccc)
+static void gatt_ccc_changed(const struct bt_gatt_attr *attr,
+			     struct _bt_gatt_ccc *ccc)
 {
 	int i;
 	uint16_t value = 0x0000;
@@ -402,7 +402,7 @@ static void gatt_ccc_changed(struct _bt_gatt_ccc *ccc)
 
 	if (value != ccc->value) {
 		ccc->value = value;
-		ccc->cfg_changed(value);
+		ccc->cfg_changed(attr, value);
 	}
 }
 
@@ -454,7 +454,7 @@ ssize_t bt_gatt_attr_write_ccc(struct bt_conn *conn,
 
 	/* Update cfg if don't match */
 	if (ccc->cfg[i].value != ccc->value) {
-		gatt_ccc_changed(ccc);
+		gatt_ccc_changed(attr, ccc);
 	}
 
 	return len;
@@ -498,7 +498,7 @@ static int notify(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 
 	BT_DBG("");
 
-	nano_sem_take(&conn->gatt_notif_sem, TICKS_UNLIMITED);
+	k_sem_take(&conn->gatt_notif_sem, K_FOREVER);
 
 	notif.params.conn_handle = conn->handle;
 	notif.params.attr = attr;
@@ -531,7 +531,7 @@ void on_nble_gatts_notify_tx_evt(const struct nble_gatts_notify_tx_evt *evt)
 		return;
 	}
 
-	nano_sem_give(&conn->gatt_notif_sem);
+	k_sem_give(&conn->gatt_notif_sem);
 
 	bt_conn_unref(conn);
 }
@@ -1044,10 +1044,10 @@ void on_nble_gattc_read_rsp(const struct nble_gattc_read_rsp *rsp,
 
 	/*
 	 * Core Spec 4.2, Vol. 3, Part G, 4.8.1
-	 * If the Characteristic Value is greater than (ATT_MTU – 1) octets
+	 * If the Characteristic Value is greater than (ATT_MTU - 1) octets
 	 * in length, the Read Long Characteristic Value procedure may be used
 	 * if the rest of the Characteristic Value is required.
-	 * The data contain only (ATT_MTU – 1) octets.
+	 * The data contain only (ATT_MTU - 1) octets.
 	 */
 	if (len < (BLE_GATT_MTU_SIZE - 1)) {
 		params->func(conn, 0, params, NULL, 0);
@@ -1421,7 +1421,7 @@ static int32_t prep_write_evt(const struct nble_gatts_write_evt *ev,
 		return ret;
 	}
 
-	buf = net_buf_get_timeout(&prep_data, 0, TICKS_NONE);
+	buf = net_buf_alloc(&prep_pool, K_NO_WAIT);
 	if (!buf) {
 		BT_ERR("No more buffers for prepare write");
 		return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
@@ -1429,9 +1429,9 @@ static int32_t prep_write_evt(const struct nble_gatts_write_evt *ev,
 
 	/* Copy data into the outstanding queue */
 	memcpy(net_buf_user_data(buf), ev, sizeof(*ev));
-	memcpy(net_buf_add(buf, len), data, len);
+	net_buf_add_mem(buf, data, len);
 
-	nano_fifo_put(&queue, buf);
+	k_fifo_put(&queue, buf);
 
 	return 0;
 #else
@@ -1512,13 +1512,13 @@ void on_nble_gatts_write_exec_evt(const struct nble_gatts_write_exec_evt *evt)
 		return;
 	}
 
-	while ((buf = nano_fifo_get(&queue, TICKS_NONE))) {
+	while ((buf = k_fifo_get(&queue, K_NO_WAIT))) {
 		struct nble_gatts_write_evt *ev = net_buf_user_data(buf);
 		const struct bt_gatt_attr *attr = ev->attr;
 
 		/* Skip buffer for other connections */
 		if (ev->conn_handle != evt->conn_handle) {
-			nano_fifo_put(&queue, buf);
+			k_fifo_put(&queue, buf);
 			continue;
 		}
 
@@ -1581,19 +1581,12 @@ void on_nble_gatts_read_evt(const struct nble_gatts_read_evt *ev)
 void bt_gatt_init(void)
 {
 	BT_DBG("");
-
-#if CONFIG_BLUETOOTH_ATT_PREPARE_COUNT > 0
-	nano_fifo_init(&queue);
-	net_buf_pool_init(prep_pool);
-#endif
 }
 
 void bt_gatt_connected(struct bt_conn *conn)
 {
-	nano_sem_init(&conn->gatt_notif_sem);
-
 	/* Allow to send first notification */
-	nano_sem_give(&conn->gatt_notif_sem);
+	k_sem_init(&conn->gatt_notif_sem, 1, UINT_MAX);
 }
 
 void bt_gatt_disconnected(struct bt_conn *conn)
@@ -1604,7 +1597,7 @@ void bt_gatt_disconnected(struct bt_conn *conn)
 
 #if CONFIG_BLUETOOTH_ATT_PREPARE_COUNT > 0
 	/* Discard queued buffers */
-	while ((buf = nano_fifo_get(&queue, TICKS_NONE))) {
+	while ((buf = k_fifo_get(&queue, K_NO_WAIT))) {
 		net_buf_unref(buf);
 	}
 #endif

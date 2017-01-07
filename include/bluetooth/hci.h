@@ -20,6 +20,7 @@
 
 #include <toolchain.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <misc/util.h>
 
@@ -64,6 +65,36 @@ static inline void bt_addr_le_copy(bt_addr_le_t *dst, const bt_addr_le_t *src)
 	memcpy(dst, src, sizeof(*dst));
 }
 
+#define BT_ADDR_IS_RPA(addr)     (((addr)->val[5] & 0xc0) == 0x40)
+#define BT_ADDR_IS_NRPA(addr)    (((addr)->val[5] & 0xc0) == 0x00)
+#define BT_ADDR_IS_STATIC(addr)  (((addr)->val[5] & 0xc0) == 0xc0)
+
+#define BT_ADDR_SET_RPA(addr)    ((addr)->val[5] = \
+					(((addr)->val[5] & 0x3f) | 0x40))
+#define BT_ADDR_SET_NRPA(addr)   ((addr)->val[5] &= 0x3f)
+#define BT_ADDR_SET_STATIC(addr) ((addr)->val[5] |= 0xc0)
+
+int bt_addr_le_create_nrpa(bt_addr_le_t *addr);
+int bt_addr_le_create_static(bt_addr_le_t *addr);
+
+static inline bool bt_addr_le_is_rpa(const bt_addr_le_t *addr)
+{
+	if (addr->type != BT_ADDR_LE_RANDOM) {
+		return false;
+	}
+
+	return BT_ADDR_IS_RPA(&addr->a);
+}
+
+static inline bool bt_addr_le_is_identity(const bt_addr_le_t *addr)
+{
+	if (addr->type == BT_ADDR_LE_PUBLIC) {
+		return true;
+	}
+
+	return BT_ADDR_IS_STATIC(&addr->a);
+}
+
 /* HCI Error Codes */
 #define BT_HCI_ERR_UNKNOWN_CMD                  0x01
 #define BT_HCI_ERR_UNKNOWN_CONN_ID              0x02
@@ -73,6 +104,7 @@ static inline void bt_addr_le_copy(bt_addr_le_t *dst, const bt_addr_le_t *src)
 #define BT_HCI_ERR_CMD_DISALLOWED               0x0c
 #define BT_HCI_ERR_INSUFFICIENT_RESOURCES       0x0d
 #define BT_HCI_ERR_UNSUPP_FEATURE_PARAMS_VAL    0x11
+#define BT_HCI_ERR_INVALID_PARAMS               0x12
 #define BT_HCI_ERR_REMOTE_USER_TERM_CONN        0x13
 #define BT_HCI_ERR_PAIRING_NOT_ALLOWED          0x18
 #define BT_HCI_ERR_UNSUPP_REMOTE_FEATURE        0x1a
@@ -141,9 +173,23 @@ struct bt_hci_cmd_hdr {
 #define BT_FEAT_SC(feat)                        BT_FEAT_TEST(feat, 2, 1, 0)
 
 /* LE features */
-#define BT_FEAT_LE_ENCR(feat)                   BT_FEAT_TEST(feat, 0, 0, 0)
-#define BT_FEAT_LE_CONN_PARAM_REQ_PROC(feat)    BT_FEAT_TEST(feat, 0, 0, 1)
-#define BT_FEAT_LE_SLAVE_FEATURE_XCHG(feat)     BT_FEAT_TEST(feat, 0, 0, 3)
+#define BT_LE_FEAT_BIT_ENC                      0
+#define BT_LE_FEAT_BIT_CONN_PARAM_REQ           1
+#define BT_LE_FEAT_BIT_EXT_REJ_IND              2
+#define BT_LE_FEAT_BIT_SLAVE_FEAT_REQ           3
+#define BT_LE_FEAT_BIT_PING                     4
+#define BT_LE_FEAT_BIT_DLE                      5
+#define BT_LE_FEAT_BIT_PRIVACY                  6
+#define BT_LE_FEAT_BIT_EXT_SCAN                 7
+
+#define BT_FEAT_LE_ENCR(feat)                   BT_FEAT_TEST(feat, 0, 0, \
+						BT_LE_FEAT_BIT_ENC)
+#define BT_FEAT_LE_CONN_PARAM_REQ_PROC(feat)    BT_FEAT_TEST(feat, 0, 0, \
+						BT_LE_FEAT_BIT_CONN_PARAM_REQ)
+#define BT_FEAT_LE_SLAVE_FEATURE_XCHG(feat)     BT_FEAT_TEST(feat, 0, 0, \
+						BT_LE_FEAT_BIT_SLAVE_FEAT_REQ)
+#define BT_FEAT_LE_DLE(feat)                    BT_FEAT_TEST(feat, 0, 0, \
+						BT_LE_FEAT_BIT_DLE)
 
 /* LE States */
 #define BT_LE_STATES_SLAVE_CONN_ADV(states)     (states & 0x0000004000000000)
@@ -373,6 +419,8 @@ struct bt_hci_write_local_name {
 	uint8_t local_name[248];
 } __packed;
 
+#define BT_HCI_OP_WRITE_PAGE_TIMEOUT            BT_OP(BT_OGF_BASEBAND, 0x0018)
+
 #define BT_HCI_OP_WRITE_SCAN_ENABLE             BT_OP(BT_OGF_BASEBAND, 0x001a)
 #define BT_BREDR_SCAN_DISABLED                  0x00
 #define BT_BREDR_SCAN_INQUIRY                   0x01
@@ -420,6 +468,17 @@ struct bt_hci_cp_write_le_host_supp {
 struct bt_hci_cp_write_sc_host_supp {
 	uint8_t  sc_support;
 } __packed;
+
+/* HCI version from Assigned Numbers */
+#define BT_HCI_VERSION_1_0B                     0
+#define BT_HCI_VERSION_1_1                      1
+#define BT_HCI_VERSION_1_2                      2
+#define BT_HCI_VERSION_2_0                      3
+#define BT_HCI_VERSION_2_1                      4
+#define BT_HCI_VERSION_3_0                      5
+#define BT_HCI_VERSION_4_0                      6
+#define BT_HCI_VERSION_4_1                      7
+#define BT_HCI_VERSION_4_2                      8
 
 #define BT_HCI_OP_READ_LOCAL_VERSION_INFO       BT_OP(BT_OGF_INFO, 0x0001)
 struct bt_hci_rp_read_local_version_info {
@@ -908,6 +967,13 @@ struct bt_hci_evt_cmd_status {
 	uint8_t  status;
 	uint8_t  ncmd;
 	uint16_t opcode;
+} __packed;
+
+#define BT_HCI_EVT_ROLE_CHANGE                  0x12
+struct bt_hci_evt_role_change {
+	uint8_t   status;
+	bt_addr_t bdaddr;
+	uint8_t   role;
 } __packed;
 
 #define BT_HCI_EVT_NUM_COMPLETED_PACKETS        0x13

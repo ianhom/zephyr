@@ -18,11 +18,11 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <misc/util.h>
 #define SYS_LOG_NO_NEWLINE
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_ADC_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 #include <string.h>
 #include <init.h>
 
@@ -111,6 +111,8 @@ static inline int32_t _ti_adc108s102_prepare(struct device *dev)
 
 static void ti_adc108s102_enable(struct device *dev)
 {
+	ARG_UNUSED(dev);
+
 	/*
 	 * There is nothing to be done. If there is no sampling going on,
 	 * the chip will put itself on power-saving mode (that is because
@@ -120,6 +122,8 @@ static void ti_adc108s102_enable(struct device *dev)
 
 static void ti_adc108s102_disable(struct device *dev)
 {
+	ARG_UNUSED(dev);
+
 	/* Same issue as with ti_adc108s102_enable() */
 }
 
@@ -153,15 +157,11 @@ static int ti_adc108s102_read(struct device *dev,
 	const struct ti_adc108s102_config *config = dev->config->config_info;
 	struct ti_adc108s102_data *adc = dev->driver_data;
 	struct spi_config spi_conf;
-	uint32_t data[2] = {0, 0};
-	struct nano_timer timer;
 	int ret = 0;
 	int32_t delay;
 
 	spi_conf.config = config->spi_config_flags;
 	spi_conf.max_sys_freq = config->spi_freq;
-
-	nano_timer_init(&timer, data);
 
 	if (spi_configure(adc->spi, &spi_conf)) {
 		return -EIO;
@@ -187,8 +187,11 @@ static int ti_adc108s102_read(struct device *dev,
 			break;
 		}
 
-		nano_timer_start(&timer, delay);
-		nano_task_timer_test(&timer, TICKS_UNLIMITED);
+		/* convert to milliseconds */
+		delay = (int32_t)((MSEC_PER_SEC * (uint64_t)delay) /
+			sys_clock_ticks_per_sec);
+
+		k_sleep(delay);
 
 		ret = _ti_adc108s102_sampling(dev);
 		if (ret != 0) {
@@ -201,13 +204,13 @@ static int ti_adc108s102_read(struct device *dev,
 	return ret;
 }
 
-struct adc_driver_api ti_adc108s102_api = {
+static const struct adc_driver_api ti_adc108s102_api = {
 	.enable = ti_adc108s102_enable,
 	.disable = ti_adc108s102_disable,
 	.read = ti_adc108s102_read,
 };
 
-int ti_adc108s102_init(struct device *dev)
+static int ti_adc108s102_init(struct device *dev)
 {
 	const struct ti_adc108s102_config *config = dev->config->config_info;
 	struct ti_adc108s102_data *adc = dev->driver_data;
@@ -226,9 +229,9 @@ int ti_adc108s102_init(struct device *dev)
 
 #ifdef CONFIG_ADC_TI_ADC108S102
 
-struct ti_adc108s102_data adc108s102_data;
+static struct ti_adc108s102_data adc108s102_data;
 
-static struct ti_adc108s102_config adc108s102_config = {
+static const struct ti_adc108s102_config adc108s102_config = {
 	.spi_port = CONFIG_ADC_TI_ADC108S102_SPI_PORT_NAME,
 	.spi_config_flags = CONFIG_ADC_TI_ADC108S102_SPI_CONFIGURATION,
 	.spi_freq = CONFIG_ADC_TI_ADC108S102_SPI_MAX_FREQ,
@@ -238,6 +241,6 @@ static struct ti_adc108s102_config adc108s102_config = {
 DEVICE_INIT(adc108s102, CONFIG_ADC_0_NAME,
 			ti_adc108s102_init,
 			&adc108s102_data, &adc108s102_config,
-			SECONDARY, CONFIG_ADC_INIT_PRIORITY);
+			POST_KERNEL, CONFIG_ADC_INIT_PRIORITY);
 
 #endif /* CONFIG_ADC_TI_ADC108S102 */

@@ -23,7 +23,7 @@
  * hardware for the fsl_frdm_k64f platform.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <init.h>
 #include <soc.h>
@@ -40,6 +40,8 @@
 #define ER32KSEL_OSC32KCLK	(0)
 #define ER32KSEL_RTC		(2)
 #define ER32KSEL_LPO1KHZ	(3)
+
+#define TIMESRC_OSCERCLK        (2)
 
 /*
  * K64F Flash configuration fields
@@ -139,6 +141,10 @@ static ALWAYS_INLINE void clkInit(void)
 				      CONFIG_MCG_FCRDIV);
 
 	CLOCK_SetSimConfig(&simConfig);
+
+#if CONFIG_ETH_KSDK
+	CLOCK_SetEnetTime0Clock(TIMESRC_OSCERCLK);
+#endif
 }
 
 /**
@@ -203,4 +209,4 @@ static int fsl_frdm_k64f_init(struct device *arg)
 	return 0;
 }
 
-SYS_INIT(fsl_frdm_k64f_init, PRIMARY, 0);
+SYS_INIT(fsl_frdm_k64f_init, PRE_KERNEL_1, 0);

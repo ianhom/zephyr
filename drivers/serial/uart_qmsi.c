@@ -28,22 +28,6 @@
 #include "soc.h"
 #include "qm_soc_regs.h"
 
-/*
- * The CPU-visible IRQ numbers change between the ARC and IA cores,
- * and QMSI itself has no indirection.  Similarly the mask needed to
- * tell the SCSS how to route the IRQ depends on which CPU we need to
- * receive it.
- */
-#ifdef CONFIG_SOC_QUARK_SE_C1000_SS
-# define UART0_IRQ		QM_IRQ_UART_0_VECTOR
-# define UART1_IRQ		QM_IRQ_UART_1_VECTOR
-# define SCSS_IRQ_ROUTING_MASK	BIT(8)
-#else
-# define UART0_IRQ		QM_IRQ_UART_0
-# define UART1_IRQ		QM_IRQ_UART_1
-# define SCSS_IRQ_ROUTING_MASK	BIT(0)
-#endif
-
 #define IIR_IID_NO_INTERRUPT_PENDING 0x01
 
 #define DIVISOR_LOW(baudrate) \
@@ -78,23 +62,13 @@ struct uart_qmsi_drv_data {
 
 #define uart_qmsi_set_power_state(...)
 #else
-struct uart_context_t {
-	uint32_t ier; /**< Interrupt Enable Register. */
-	uint32_t dlh; /**< Divisor Latch High. */
-	uint32_t dll; /**< Divisor Latch Low. */
-	uint32_t lcr; /**< Line Control. */
-	uint32_t mcr; /**< Modem Control. */
-	uint32_t scr; /**< Scratchpad. */
-	uint32_t htx; /**< Halt Transmission. */
-	uint32_t dlf; /**< Divisor Latch Fraction. */
-	uint32_t int_uart_mask; /**< Interrupt Mask. */
-};
-
 struct uart_qmsi_drv_data {
 	uart_irq_callback_t user_cb;
 	uint8_t iir_cache;
-	struct uart_context_t ctx_save;
 	uint32_t device_power_state;
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+	qm_uart_context_t ctx;
+#endif
 };
 
 static void uart_qmsi_set_power_state(struct device *dev, uint32_t power_state)
@@ -111,35 +85,17 @@ static uint32_t uart_qmsi_get_power_state(struct device *dev)
 	return context->device_power_state;
 }
 
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 static int uart_suspend_device(struct device *dev)
 {
+	const struct uart_qmsi_config_info *config = dev->config->config_info;
+	struct uart_qmsi_drv_data *drv_data = dev->driver_data;
+
 	if (device_busy_check(dev)) {
 		return -EBUSY;
 	}
 
-	const struct uart_qmsi_config_info *config = dev->config->config_info;
-	qm_uart_reg_t *const regs = QM_UART[config->instance];
-	struct uart_qmsi_drv_data *drv_data = dev->driver_data;
-	struct uart_context_t *const ctx_save = &drv_data->ctx_save;
-
-	if (config->instance == QM_UART_0) {
-		ctx_save->int_uart_mask = QM_SCSS_INT->int_uart_0_mask;
-	} else {
-		ctx_save->int_uart_mask = QM_SCSS_INT->int_uart_1_mask;
-	}
-
-	ctx_save->ier = regs->ier_dlh;
-	ctx_save->lcr = regs->lcr;
-	ctx_save->mcr = regs->mcr;
-	ctx_save->scr = regs->scr;
-	ctx_save->htx = regs->htx;
-	ctx_save->dlf = regs->dlf;
-
-	/* When DLAB is set, DLL and DLH registers can be accessed. */
-	regs->lcr |= QM_UART_LCR_DLAB;
-	ctx_save->dlh = regs->ier_dlh;
-	ctx_save->dll = regs->rbr_thr_dll;
-	regs->lcr &= ~QM_UART_LCR_DLAB;
+	qm_uart_save_context(config->instance, &drv_data->ctx);
 
 	uart_qmsi_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
 
@@ -149,45 +105,17 @@ static int uart_suspend_device(struct device *dev)
 static int uart_resume_device_from_suspend(struct device *dev)
 {
 	const struct uart_qmsi_config_info *config = dev->config->config_info;
-	qm_uart_reg_t *const regs = QM_UART[config->instance];
 	struct uart_qmsi_drv_data *drv_data = dev->driver_data;
-	struct uart_context_t *const ctx_save = &drv_data->ctx_save;
 
 	clk_periph_enable(config->clock_gate);
 
-	if (config->instance == QM_UART_0) {
-		QM_SCSS_INT->int_uart_0_mask = ctx_save->int_uart_mask;
-	} else {
-		QM_SCSS_INT->int_uart_1_mask = ctx_save->int_uart_mask;
-	}
-
-	/* When DLAB is set, DLL and DLH registers can be accessed. */
-	regs->lcr |= QM_UART_LCR_DLAB;
-	regs->ier_dlh = ctx_save->dlh;
-	regs->rbr_thr_dll = ctx_save->dll;
-	regs->lcr &= ~QM_UART_LCR_DLAB;
-
-	regs->ier_dlh = ctx_save->ier;
-	regs->lcr = ctx_save->lcr;
-	regs->mcr = ctx_save->mcr;
-	regs->scr = ctx_save->scr;
-	regs->htx = ctx_save->htx;
-	regs->dlf = ctx_save->dlf;
-
-	/*
-	 * FIFO control register cannot be read back,
-	 * default config is applied for this register.
-	 * Application will need to restore its own parameters.
-	 */
-	regs->iir_fcr =
-		(QM_UART_FCR_FIFOE | QM_UART_FCR_RFIFOR |
-		 QM_UART_FCR_XFIFOR |
-		 QM_UART_FCR_DEFAULT_TX_RX_THRESHOLD);
+	qm_uart_restore_context(config->instance, &drv_data->ctx);
 
 	uart_qmsi_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
 
 	return 0;
 }
+#endif
 
 /*
 * Implements the driver control management functionality
@@ -197,11 +125,13 @@ static int uart_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 				 void *context)
 {
 	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
 			return uart_suspend_device(dev);
 		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
 			return uart_resume_device_from_suspend(dev);
 		}
+#endif
 	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
 		*((uint32_t *)context) = uart_qmsi_get_power_state(dev);
 		return 0;
@@ -216,7 +146,7 @@ static int uart_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 static void irq_config_func_0(struct device *dev);
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-static struct uart_qmsi_config_info config_info_0 = {
+static const struct uart_qmsi_config_info config_info_0 = {
 	.instance = QM_UART_0,
 	.clock_gate = CLK_PERIPH_UARTA_REGISTER | CLK_PERIPH_CLK,
 	.baud_divisor = QM_UART_CFG_BAUD_DL_PACK(
@@ -235,7 +165,7 @@ static struct uart_qmsi_config_info config_info_0 = {
 static struct uart_qmsi_drv_data drv_data_0;
 
 DEVICE_DEFINE(uart_0, CONFIG_UART_QMSI_0_NAME, &uart_qmsi_init,
-	      uart_qmsi_device_ctrl, &drv_data_0, &config_info_0, PRIMARY,
+	      uart_qmsi_device_ctrl, &drv_data_0, &config_info_0, PRE_KERNEL_1,
 	      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
 #endif /* CONFIG_UART_QMSI_0 */
 
@@ -244,7 +174,7 @@ DEVICE_DEFINE(uart_0, CONFIG_UART_QMSI_0_NAME, &uart_qmsi_init,
 static void irq_config_func_1(struct device *dev);
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-static struct uart_qmsi_config_info config_info_1 = {
+static const struct uart_qmsi_config_info config_info_1 = {
 	.instance = QM_UART_1,
 	.clock_gate = CLK_PERIPH_UARTB_REGISTER | CLK_PERIPH_CLK,
 	.baud_divisor = QM_UART_CFG_BAUD_DL_PACK(
@@ -263,7 +193,7 @@ static struct uart_qmsi_config_info config_info_1 = {
 static struct uart_qmsi_drv_data drv_data_1;
 
 DEVICE_DEFINE(uart_1, CONFIG_UART_QMSI_1_NAME, &uart_qmsi_init,
-	      uart_qmsi_device_ctrl, &drv_data_1, &config_info_1, PRIMARY,
+	      uart_qmsi_device_ctrl, &drv_data_1, &config_info_1, PRE_KERNEL_1,
 	      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
 #endif /* CONFIG_UART_QMSI_1 */
 
@@ -455,22 +385,26 @@ static void uart_qmsi_isr(void *arg)
 #ifdef CONFIG_UART_QMSI_0
 static void irq_config_func_0(struct device *dev)
 {
-	IRQ_CONNECT(UART0_IRQ, CONFIG_UART_QMSI_0_IRQ_PRI,
-		    uart_qmsi_isr, DEVICE_GET(uart_0),
-		    UART_IRQ_FLAGS);
-	irq_enable(UART0_IRQ);
-	QM_SCSS_INT->int_uart_0_mask &= ~SCSS_IRQ_ROUTING_MASK;
+	ARG_UNUSED(dev);
+
+	IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_UART_0_INT),
+		    CONFIG_UART_QMSI_0_IRQ_PRI, uart_qmsi_isr,
+		    DEVICE_GET(uart_0), UART_IRQ_FLAGS);
+	irq_enable(IRQ_GET_NUMBER(QM_IRQ_UART_0_INT));
+	QM_IR_UNMASK_INTERRUPTS(QM_INTERRUPT_ROUTER->uart_0_int_mask);
 }
 #endif /* CONFIG_UART_QMSI_0 */
 
 #ifdef CONFIG_UART_QMSI_1
 static void irq_config_func_1(struct device *dev)
 {
-	IRQ_CONNECT(UART1_IRQ, CONFIG_UART_QMSI_1_IRQ_PRI,
-		    uart_qmsi_isr, DEVICE_GET(uart_1),
-		    UART_IRQ_FLAGS);
-	irq_enable(UART1_IRQ);
-	QM_SCSS_INT->int_uart_1_mask &= ~SCSS_IRQ_ROUTING_MASK;
+	ARG_UNUSED(dev);
+
+	IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_UART_1_INT),
+		    CONFIG_UART_QMSI_1_IRQ_PRI, uart_qmsi_isr,
+		    DEVICE_GET(uart_1), UART_IRQ_FLAGS);
+	irq_enable(IRQ_GET_NUMBER(QM_IRQ_UART_1_INT));
+	QM_IR_UNMASK_INTERRUPTS(QM_INTERRUPT_ROUTER->uart_1_int_mask);
 }
 #endif /* CONFIG_UART_QMSI_1 */
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
@@ -487,7 +421,6 @@ static int uart_qmsi_line_ctrl_set(struct device *dev, uint32_t ctrl, uint32_t v
 		cfg.baud_divisor = QM_UART_CFG_BAUD_DL_PACK(DIVISOR_HIGH(val),
 							    DIVISOR_LOW(val), 0);
 		cfg.hw_fc = QM_UART[instance]->mcr & QM_UART_MCR_AFCE;
-		cfg.int_en = false;
 		qm_uart_set_config(instance, &cfg);
 		break;
 	default:
@@ -505,7 +438,7 @@ static int uart_qmsi_drv_cmd(struct device *dev, uint32_t cmd, uint32_t p)
 }
 #endif /* CONFIG_UART_DRV_CMD */
 
-static struct uart_driver_api api = {
+static const struct uart_driver_api api = {
 	.poll_in = uart_qmsi_poll_in,
 	.poll_out = uart_qmsi_poll_out,
 	.err_check = uart_qmsi_err_check,
@@ -538,13 +471,12 @@ static struct uart_driver_api api = {
 
 static int uart_qmsi_init(struct device *dev)
 {
-	struct uart_qmsi_config_info *config = dev->config->config_info;
+	const struct uart_qmsi_config_info *config = dev->config->config_info;
 	qm_uart_config_t cfg;
 
 	cfg.line_control = QM_UART_LC_8N1;
 	cfg.baud_divisor = config->baud_divisor;
 	cfg.hw_fc = config->hw_fc;
-	cfg.int_en = false;
 
 	clk_periph_enable(config->clock_gate);
 

@@ -16,9 +16,9 @@
 
 /**
  * @file
- * @brief Cortex-M public nanokernel miscellaneous
+ * @brief Cortex-M public kernel miscellaneous
  *
- * ARM-specific nanokernel miscellaneous interface. Included by ARM/arch.h.
+ * ARM-specific kernel miscellaneous interface. Included by arm/arch.h.
  */
 
 #ifndef _ARCH_ARM_CORTEXM_MISC_H_
@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #ifndef _ASMLANGUAGE
-extern void nano_cpu_idle(void);
+extern void k_cpu_idle(void);
 #endif
 
 #ifdef __cplusplus

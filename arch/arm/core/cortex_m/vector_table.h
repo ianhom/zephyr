@@ -42,21 +42,19 @@ extern "C" {
 #include <sections.h>
 #include <misc/util.h>
 
-/* location of MSP and PSP upon boot: at the end of SRAM */
-.equ __CORTEXM_BOOT_MSP, (CONFIG_SRAM_BASE_ADDRESS + KB(CONFIG_SRAM_SIZE) - 8)
-.equ __CORTEXM_BOOT_PSP, (__CORTEXM_BOOT_MSP - 0x100)
-
 GTEXT(__start)
 GTEXT(_vector_table)
 
 GTEXT(__reset)
 GTEXT(__nmi)
 GTEXT(__hard_fault)
+#if !defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
 GTEXT(__mpu_fault)
 GTEXT(__bus_fault)
 GTEXT(__usage_fault)
 GTEXT(__svc)
 GTEXT(__debug_monitor)
+#endif
 GTEXT(__pendsv)
 GTEXT(__reserved)
 

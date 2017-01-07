@@ -19,7 +19,7 @@
 #include <device.h>
 #include <drivers/ioapic.h>
 #include <init.h>
-#include <nanokernel.h>
+#include <kernel.h>
 #include <spi.h>
 #include <gpio.h>
 #include <power.h>
@@ -27,6 +27,7 @@
 #include "qm_spi.h"
 #include "clk.h"
 #include "qm_isr.h"
+#include "soc.h"
 
 struct pending_transfer {
 	struct device *dev;
@@ -41,27 +42,18 @@ struct spi_qmsi_config {
 	uint32_t cs_pin;
 };
 
-struct spi_context_t {
-	uint32_t ctrlr0;
-	uint32_t baudr;
-	uint32_t ser;
-	/* FIXME: When moving suspend/resume to QMSI,
-	 * int_*_masks will need to be removed as the
-	 * QMSI ROM will not reset it anymore.
-	 */
-	uint32_t int_spi_mask;
-};
-
 struct spi_qmsi_runtime {
 	struct device *gpio_cs;
-	device_sync_call_t sync;
+	struct k_sem device_sync_sem;
 	qm_spi_config_t cfg;
 	int rc;
 	bool loopback;
-	struct nano_sem sem;
+	struct k_sem sem;
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-	struct spi_context_t ctx_save;
 	uint32_t device_power_state;
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+	qm_spi_context_t spi_ctx;
+#endif
 #endif
 };
 
@@ -128,7 +120,7 @@ static void transfer_complete(void *data, int error, qm_spi_status_t status,
 
 	pending->dev = NULL;
 	context->rc = error;
-	device_sync_call_complete(&context->sync);
+	k_sem_give(&context->device_sync_sem);
 }
 
 static int spi_qmsi_slave_select(struct device *dev, uint32_t slave)
@@ -164,13 +156,13 @@ static int spi_qmsi_transceive(struct device *dev,
 	qm_spi_async_transfer_t *xfer;
 	int rc;
 
-	nano_sem_take(&context->sem, TICKS_UNLIMITED);
+	k_sem_take(&context->sem, K_FOREVER);
 	if (pending_transfers[spi].dev) {
-		nano_sem_give(&context->sem);
+		k_sem_give(&context->sem);
 		return -EBUSY;
 	}
 	pending_transfers[spi].dev = dev;
-	nano_sem_give(&context->sem);
+	k_sem_give(&context->sem);
 
 	device_busy_set(dev);
 
@@ -214,14 +206,14 @@ static int spi_qmsi_transceive(struct device *dev,
 		device_busy_clear(dev);
 		return -EIO;
 	}
-	device_sync_call_wait(&context->sync);
+	k_sem_take(&context->device_sync_sem, K_FOREVER);
 
 	device_busy_clear(dev);
 
 	return context->rc ? -EIO : 0;
 }
 
-static struct spi_driver_api spi_qmsi_api = {
+static const struct spi_driver_api spi_qmsi_api = {
 	.configure = spi_qmsi_configure,
 	.slave_select = spi_qmsi_slave_select,
 	.transceive = spi_qmsi_transceive,
@@ -238,8 +230,13 @@ static struct device *gpio_cs_init(const struct spi_qmsi_config *config)
 	if (!gpio)
 		return NULL;
 
-	gpio_pin_configure(gpio, config->cs_pin, GPIO_DIR_OUT);
-	gpio_pin_write(gpio, config->cs_pin, 1);
+	if (gpio_pin_configure(gpio, config->cs_pin, GPIO_DIR_OUT) != 0) {
+		return NULL;
+	}
+
+	if (gpio_pin_write(gpio, config->cs_pin, 1) != 0) {
+		return NULL;
+	}
 
 	return gpio;
 }
@@ -268,22 +265,24 @@ static int spi_qmsi_init(struct device *dev)
 
 	switch (spi_config->spi) {
 	case QM_SPI_MST_0:
-		IRQ_CONNECT(QM_IRQ_SPI_MASTER_0,
+		IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_SPI_MASTER_0_INT),
 			    CONFIG_SPI_0_IRQ_PRI, qm_spi_master_0_isr,
 			    0, IOAPIC_LEVEL | IOAPIC_HIGH);
-		irq_enable(QM_IRQ_SPI_MASTER_0);
+		irq_enable(IRQ_GET_NUMBER(QM_IRQ_SPI_MASTER_0_INT));
 		clk_periph_enable(CLK_PERIPH_CLK | CLK_PERIPH_SPI_M0_REGISTER);
-		QM_SCSS_INT->int_spi_mst_0_mask &= ~BIT(0);
+		QM_IR_UNMASK_INTERRUPTS(
+				QM_INTERRUPT_ROUTER->spi_master_0_int_mask);
 		break;
 
 #ifdef CONFIG_SPI_1
 	case QM_SPI_MST_1:
-		IRQ_CONNECT(QM_IRQ_SPI_MASTER_1,
+		IRQ_CONNECT(IRQ_GET_NUMBER(QM_IRQ_SPI_MASTER_1_INT),
 			    CONFIG_SPI_1_IRQ_PRI, qm_spi_master_1_isr,
 			    0, IOAPIC_LEVEL | IOAPIC_HIGH);
-		irq_enable(QM_IRQ_SPI_MASTER_1);
+		irq_enable(IRQ_GET_NUMBER(QM_IRQ_SPI_MASTER_1_INT));
 		clk_periph_enable(CLK_PERIPH_CLK | CLK_PERIPH_SPI_M1_REGISTER);
-		QM_SCSS_INT->int_spi_mst_1_mask &= ~BIT(0);
+		QM_IR_UNMASK_INTERRUPTS(
+				QM_INTERRUPT_ROUTER->spi_master_1_int_mask);
 		break;
 #endif /* CONFIG_SPI_1 */
 
@@ -293,9 +292,9 @@ static int spi_qmsi_init(struct device *dev)
 
 	context->gpio_cs = gpio_cs_init(spi_config);
 
-	device_sync_call_init(&context->sync);
-	nano_sem_init(&context->sem);
-	nano_sem_give(&context->sem);
+	k_sem_init(&context->device_sync_sem, 0, UINT_MAX);
+	k_sem_init(&context->sem, 0, UINT_MAX);
+	k_sem_give(&context->sem);
 
 	spi_master_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
 
@@ -304,6 +303,7 @@ static int spi_qmsi_init(struct device *dev)
 }
 
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 static int spi_master_suspend_device(struct device *dev)
 {
 	if (device_busy_check(dev)) {
@@ -311,43 +311,27 @@ static int spi_master_suspend_device(struct device *dev)
 	}
 
 	const struct spi_qmsi_config *config = dev->config->config_info;
-	qm_spi_reg_t *const regs = QM_SPI[config->spi];
 	struct spi_qmsi_runtime *drv_data = dev->driver_data;
-	struct spi_context_t *const ctx_save = &drv_data->ctx_save;
 
-	if (config->spi == QM_SPI_MST_0) {
-		ctx_save->int_spi_mask = QM_SCSS_INT->int_spi_mst_0_mask;
-	} else {
-		ctx_save->int_spi_mask = QM_SCSS_INT->int_spi_mst_1_mask;
-	}
-
-	ctx_save->ctrlr0 = regs->ctrlr0;
-	ctx_save->ser = regs->ser;
-	ctx_save->baudr = regs->baudr;
+	qm_spi_save_context(config->spi, &drv_data->spi_ctx);
 
 	spi_master_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
+
 	return 0;
 }
 
 static int spi_master_resume_device_from_suspend(struct device *dev)
 {
 	const struct spi_qmsi_config *config = dev->config->config_info;
-	qm_spi_reg_t *const regs = QM_SPI[config->spi];
 	struct spi_qmsi_runtime *drv_data = dev->driver_data;
-	struct spi_context_t *const ctx_save = &drv_data->ctx_save;
 
-	if (config->spi == QM_SPI_MST_0) {
-		QM_SCSS_INT->int_spi_mst_0_mask = ctx_save->int_spi_mask;
-	} else {
-		QM_SCSS_INT->int_spi_mst_1_mask = ctx_save->int_spi_mask;
-	}
-	regs->ctrlr0 = ctx_save->ctrlr0;
-	regs->ser = ctx_save->ser;
-	regs->baudr = ctx_save->baudr;
+	qm_spi_restore_context(config->spi, &drv_data->spi_ctx);
 
 	spi_master_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
 	return 0;
 }
+#endif
 
 /*
 * Implements the driver control management functionality
@@ -357,11 +341,13 @@ static int spi_master_qmsi_device_ctrl(struct device *port,
 				       uint32_t ctrl_command, void *context)
 {
 	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
 			return spi_master_suspend_device(port);
 		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
 			return spi_master_resume_device_from_suspend(port);
 		}
+#endif
 	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
 		*((uint32_t *)context) = spi_master_get_power_state(port);
 		return 0;
@@ -371,7 +357,7 @@ static int spi_master_qmsi_device_ctrl(struct device *port,
 #endif /* CONFIG_DEVICE_POWER_MANAGEMENT */
 
 #ifdef CONFIG_SPI_0
-static struct spi_qmsi_config spi_qmsi_mst_0_config = {
+static const struct spi_qmsi_config spi_qmsi_mst_0_config = {
 	.spi = QM_SPI_MST_0,
 #ifdef CONFIG_SPI_CS_GPIO
 	.cs_port = CONFIG_SPI_0_CS_GPIO_PORT,
@@ -383,12 +369,12 @@ static struct spi_qmsi_runtime spi_qmsi_mst_0_runtime;
 
 DEVICE_DEFINE(spi_master_0, CONFIG_SPI_0_NAME, spi_qmsi_init,
 	      spi_master_qmsi_device_ctrl, &spi_qmsi_mst_0_runtime,
-	      &spi_qmsi_mst_0_config, SECONDARY, CONFIG_SPI_INIT_PRIORITY,
+	      &spi_qmsi_mst_0_config, POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,
 	      NULL);
 #endif /* CONFIG_SPI_0 */
 
 #ifdef CONFIG_SPI_1
-static struct spi_qmsi_config spi_qmsi_mst_1_config = {
+static const struct spi_qmsi_config spi_qmsi_mst_1_config = {
 	.spi = QM_SPI_MST_1,
 #ifdef CONFIG_SPI_CS_GPIO
 	.cs_port = CONFIG_SPI_1_CS_GPIO_PORT,
@@ -400,6 +386,6 @@ static struct spi_qmsi_runtime spi_qmsi_mst_1_runtime;
 
 DEVICE_DEFINE(spi_master_1, CONFIG_SPI_1_NAME, spi_qmsi_init,
 	      spi_master_qmsi_device_ctrl, &spi_qmsi_mst_1_runtime,
-	      &spi_qmsi_mst_1_config, SECONDARY, CONFIG_SPI_INIT_PRIORITY,
+	      &spi_qmsi_mst_1_config, POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,
 	      NULL);
 #endif /* CONFIG_SPI_1 */

@@ -47,7 +47,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <board.h>
 #include <k20_sim.h>
@@ -64,7 +64,7 @@
 #undef COMBINE_MODE_SUPPORT
 
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_PWM_K64_FTM_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 /* Maximum PWM outputs */
 #define MAX_PWM_OUT		8
@@ -752,7 +752,7 @@ static int pwm_ftm_device_ctrl(struct device *dev, uint32_t ctrl_command,
 #endif
 
 
-static struct pwm_driver_api pwm_ftm_drv_api_funcs = {
+static const struct pwm_driver_api pwm_ftm_drv_api_funcs = {
 	.config = pwm_ftm_configure,
 	.set_values = pwm_ftm_set_values,
 	.set_duty_cycle = pwm_ftm_set_duty_cycle,
@@ -778,7 +778,7 @@ int pwm_ftm_init(struct device *dev)
 #include <device.h>
 #include <init.h>
 
-static struct pwm_ftm_config pwm_ftm_0_cfg = {
+static const struct pwm_ftm_config pwm_ftm_0_cfg = {
 	.ftm_num       = 0,
 	.reg_base      = PWM_K64_FTM_0_REG_BASE,
 	.prescale      = CONFIG_PWM_K64_FTM_0_PRESCALE,
@@ -815,7 +815,7 @@ static struct pwm_ftm_drv_data pwm_ftm_0_drvdata;
 
 DEVICE_DEFINE(pwm_ftm_0, CONFIG_PWM_K64_FTM_0_DEV_NAME, pwm_ftm_init,
 	      pwm_ftm_device_ctrl, &pwm_ftm_0_drvdata, &pwm_ftm_0_cfg,
-	      SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 	      &pwm_ftm_drv_api_funcs);
 
 #endif /* CONFIG_PWM_K64_FTM_0 */
@@ -825,7 +825,7 @@ DEVICE_DEFINE(pwm_ftm_0, CONFIG_PWM_K64_FTM_0_DEV_NAME, pwm_ftm_init,
 #include <device.h>
 #include <init.h>
 
-static struct pwm_ftm_config pwm_ftm_1_cfg = {
+static const struct pwm_ftm_config pwm_ftm_1_cfg = {
 	.ftm_num       = 1,
 	.reg_base      = PWM_K64_FTM_1_REG_BASE,
 	.prescale      = CONFIG_PWM_K64_FTM_1_PRESCALE,
@@ -861,7 +861,7 @@ static struct pwm_ftm_drv_data pwm_ftm_1_drvdata;
 
 DEVICE_DEFINE(pwm_ftm_1, CONFIG_PWM_K64_FTM_1_DEV_NAME, pwm_ftm_init,
 	      pwm_ftm_device_ctrl, &pwm_ftm_1_drvdata, &pwm_ftm_1_cfg,
-	      SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 	      &pwm_ftm_drv_api_funcs);
 
 #endif /* CONFIG_PWM_K64_FTM_1 */
@@ -872,7 +872,7 @@ DEVICE_DEFINE(pwm_ftm_1, CONFIG_PWM_K64_FTM_1_DEV_NAME, pwm_ftm_init,
 #include <device.h>
 #include <init.h>
 
-static struct pwm_ftm_config pwm_ftm_2_cfg = {
+static const struct pwm_ftm_config pwm_ftm_2_cfg = {
 	.ftm_num       = 2,
 	.reg_base      = PWM_K64_FTM_2_REG_BASE,
 	.prescale      = CONFIG_PWM_K64_FTM_2_PRESCALE,
@@ -908,7 +908,7 @@ static struct pwm_ftm_drv_data pwm_ftm_2_drvdata;
 
 DEVICE_DEFINE(pwm_ftm_2, CONFIG_PWM_K64_FTM_2_DEV_NAME, pwm_ftm_init,
 	      pwm_ftm_device_ctrl, &pwm_ftm_2_drvdata, &pwm_ftm_2_cfg,
-	      SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 	      &pwm_ftm_drv_api_funcs);
 
 #endif /* CONFIG_PWM_K64_FTM_2 */
@@ -919,7 +919,7 @@ DEVICE_DEFINE(pwm_ftm_2, CONFIG_PWM_K64_FTM_2_DEV_NAME, pwm_ftm_init,
 #include <device.h>
 #include <init.h>
 
-static struct pwm_ftm_config pwm_ftm_3_cfg = {
+static const struct pwm_ftm_config pwm_ftm_3_cfg = {
 	.ftm_num       = 3,
 	.reg_base      = PWM_K64_FTM_3_REG_BASE,
 	.prescale      = CONFIG_PWM_K64_FTM_3_PRESCALE,
@@ -955,7 +955,7 @@ static struct pwm_ftm_drv_data pwm_ftm_3_drvdata;
 
 DEVICE_DEFINE(pwm_ftm_3, CONFIG_PWM_K64_FTM_3_DEV_NAME, pwm_ftm_init,
 	      pwm_ftm_device_ctrl, &pwm_ftm_3_drvdata, &pwm_ftm_3_cfg,
-	      SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 	      &pwm_ftm_drv_api_funcs);
 
 #endif /* CONFIG_PWM_K64_FTM_3 */

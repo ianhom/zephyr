@@ -1,4 +1,4 @@
-# Makefile - Bluetooth tester Makefile for microkernel
+# Makefile - Bluetooth tester
 
 #
 # Copyright (c) 2015-2016 Intel Corporation
@@ -18,12 +18,9 @@
 
 # DESCRIPTION
 # Makefile for the Bluetooth tester application
-# default for qemu_cortex_m3 as only this currently supports enought UARTs
-BOARD ?= qemu_cortex_m3
+BOARD ?= arduino_101
 
-MDEF_FILE = prj.mdef
-KERNEL_TYPE = micro
-CONF_FILE ?= prj.conf
+CONF_FILE ?= default.conf
 
 # UART for Bluetooth
 QEMU_EXTRA_FLAGS = -serial unix:/tmp/bt-server-bredr
@@ -33,4 +30,4 @@ QEMU_EXTRA_FLAGS += -serial pipe:/tmp/bt-stack-tester
 
 PRJ_INCPATH += ${ZEPHYR_BASE}/include/drivers
 
-include $(ZEPHYR_BASE)/Makefile.inc
+include $(ZEPHYR_BASE)/Makefile.test

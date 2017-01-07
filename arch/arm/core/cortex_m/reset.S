@@ -27,12 +27,14 @@
 #include <toolchain.h>
 #include <sections.h>
 #include <arch/cpu.h>
-#include <offsets.h>
+#include <offsets_short.h>
 #include "vector_table.h"
 
 _ASM_FILE_PROLOGUE
 
 GTEXT(__reset)
+GTEXT(memset)
+GDATA(_interrupt_stack)
 
 /**
  *
@@ -70,22 +72,35 @@ SECTION_SUBSEC_FUNC(TEXT,_reset_section,__start)
 #endif
 
     /* lock interrupts: will get unlocked when switch to main task */
+#if defined(CONFIG_CPU_CORTEX_M0_M0PLUS)
+    cpsid i
+#else /* CONFIG_CPU_CORTEX_M3_M4 */
     movs.n r0, #_EXC_IRQ_DEFAULT_PRIO
     msr BASEPRI, r0
-
-    /*
-     * Set PSP and use it to boot without using MSP, so that it
-     * gets set to _interrupt_stack during nanoInit().
-     */
-    ldr r0, =__CORTEXM_BOOT_PSP
-    msr PSP, r0
-    movs.n r0, #2	/* switch to using PSP (bit1 of CONTROL reg) */
-    msr CONTROL, r0
+#endif
 
 #ifdef CONFIG_WDOG_INIT
     /* board-specific watchdog initialization is necessary */
     bl _WdogInit
 #endif
+
+#ifdef CONFIG_INIT_STACKS
+    ldr r0, =_interrupt_stack
+    ldr r1, =0xaa
+    ldr r2, =CONFIG_ISR_STACK_SIZE
+    bl memset
+#endif
+
+    /*
+     * Set PSP and use it to boot without using MSP, so that it
+     * gets set to _interrupt_stack during nanoInit().
+     */
+    ldr r0, =_interrupt_stack
+    ldr r1, =CONFIG_ISR_STACK_SIZE
+    adds r0, r0, r1
+    msr PSP, r0
+    movs.n r0, #2	/* switch to using PSP (bit1 of CONTROL reg) */
+    msr CONTROL, r0
 
     b _PrepC
 
@@ -124,7 +139,7 @@ SECTION_FUNC(TEXT,_force_exit_one_nested_irq)
 		ldrne r2, =_do_software_reboot
 
 	ldr ip, =_interrupt_stack
-	add.w ip, #(__tESF_SIZEOF * 2) /* enough for a stack frame */
+	add.w ip, #(___esf_t_SIZEOF * 2) /* enough for a stack frame */
 	ldr r1, =0xfffffffe
 	and.w r2, r1
 	str r2, [ip, #(6 * 4)]

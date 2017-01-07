@@ -17,7 +17,6 @@
 #include <zephyr.h>
 #include <device.h>
 #include <sensor.h>
-#include <nanokernel.h>
 #include <stdio.h>
 
 #ifdef CONFIG_MCP9808_TRIGGER
@@ -50,8 +49,9 @@ void main(void)
 	struct sensor_value val;
 	struct sensor_trigger trig;
 
-	val.type = SENSOR_VALUE_TYPE_INT;
+	val.type = SENSOR_VALUE_TYPE_INT_PLUS_MICRO;
 	val.val1 = 26;
+	val.val2 = 0;
 
 	sensor_attr_set(dev, SENSOR_CHAN_TEMP,
 			SENSOR_ATTR_UPPER_THRESH, &val);
@@ -64,12 +64,22 @@ void main(void)
 
 	while (1) {
 		struct sensor_value temp;
+		int rc;
 
-		sensor_sample_fetch(dev);
-		sensor_channel_get(dev, SENSOR_CHAN_TEMP, &temp);
+		rc = sensor_sample_fetch(dev);
+		if (rc != 0) {
+			printf("sensor_sample_fetch error: %d\n", rc);
+			break;
+		}
+
+		rc = sensor_channel_get(dev, SENSOR_CHAN_TEMP, &temp);
+		if (rc != 0) {
+			printf("sensor_channel_get error: %d\n", rc);
+			break;
+		}
 
 		printf("temp: %d.%06d\n", temp.val1, temp.val2);
 
-		task_sleep(sys_clock_ticks_per_sec);
+		k_sleep(2000);
 	}
 }

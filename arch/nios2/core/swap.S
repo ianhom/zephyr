@@ -16,8 +16,8 @@
 
 #define _ASMLANGUAGE
 #include <arch/nios2/asm.h>
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 
 /* exports */
 GTEXT(_Swap)
@@ -25,6 +25,7 @@ GTEXT(_thread_entry_wrapper)
 
 /* imports */
 GTEXT(_sys_k_event_logger_context_switch)
+GTEXT(_k_neg_eagain)
 
 /* unsigned int _Swap(unsigned int key)
  *
@@ -32,87 +33,89 @@ GTEXT(_sys_k_event_logger_context_switch)
  */
 SECTION_FUNC(exception.other, _Swap)
 
-	/* Get a reference to _nanokernel in r10 */
-	movhi r10, %hi(_nanokernel)
-	ori   r10, r10, %lo(_nanokernel)
+	/* Get a reference to _kernel in r10 */
+	movhi r10, %hi(_kernel)
+	ori   r10, r10, %lo(_kernel)
 
-	/* Get the pointer to nanokernel->current */
-	ldw  r11, __tNANO_current_OFFSET(r10)
+	/* Get the pointer to kernel->current */
+	ldw  r11, _kernel_offset_to_current(r10)
 
 	/* Store all the callee saved registers. We either got here via
 	 * an exception or from a cooperative invocation of _Swap() from C
 	 * domain, so all the caller-saved registers have already been
 	 * saved by the exception asm or the calling C code already.
 	 */
-	stw r16, __tTCS_coopReg_OFFSET + __t_coop_r16_OFFSET(r11)
-	stw r17, __tTCS_coopReg_OFFSET + __t_coop_r17_OFFSET(r11)
-	stw r18, __tTCS_coopReg_OFFSET + __t_coop_r18_OFFSET(r11)
-	stw r19, __tTCS_coopReg_OFFSET + __t_coop_r19_OFFSET(r11)
-	stw r20, __tTCS_coopReg_OFFSET + __t_coop_r20_OFFSET(r11)
-	stw r21, __tTCS_coopReg_OFFSET + __t_coop_r21_OFFSET(r11)
-	stw r22, __tTCS_coopReg_OFFSET + __t_coop_r22_OFFSET(r11)
-	stw r23, __tTCS_coopReg_OFFSET + __t_coop_r23_OFFSET(r11)
-	stw r28, __tTCS_coopReg_OFFSET + __t_coop_r28_OFFSET(r11)
-	stw ra,  __tTCS_coopReg_OFFSET + __t_coop_ra_OFFSET(r11)
-	stw sp,  __tTCS_coopReg_OFFSET + __t_coop_sp_OFFSET(r11)
+	stw r16, _thread_offset_to_r16(r11)
+	stw r17, _thread_offset_to_r17(r11)
+	stw r18, _thread_offset_to_r18(r11)
+	stw r19, _thread_offset_to_r19(r11)
+	stw r20, _thread_offset_to_r20(r11)
+	stw r21, _thread_offset_to_r21(r11)
+	stw r22, _thread_offset_to_r22(r11)
+	stw r23, _thread_offset_to_r23(r11)
+	stw r28, _thread_offset_to_r28(r11)
+	stw ra,  _thread_offset_to_ra(r11)
+	stw sp,  _thread_offset_to_sp(r11)
 
 	/* r4 has the 'key' argument which is the result of irq_lock()
 	 * before this was called
 	 */
-	stw r4, __tTCS_coopReg_OFFSET + __t_coop_key_OFFSET(r11)
+	stw r4, _thread_offset_to_key(r11)
+
+	/* Populate default return value */
+	movhi r5, %hi(_k_neg_eagain)
+	ori   r5, r5, %lo(_k_neg_eagain)
+	ldw   r4, (r5)
+	stw   r4, _thread_offset_to_retval(r11)
 
 #if CONFIG_KERNEL_EVENT_LOGGER_CONTEXT_SWITCH
 	call _sys_k_event_logger_context_switch
 	/* Restore caller-saved r10. We could have stuck its value
 	 * onto the stack, but less instructions to just use immediates
 	 */
-	movhi r10, %hi(_nanokernel)
-	ori   r10, r10, %lo(_nanokernel)
-#endif
+	movhi r10, %hi(_kernel)
+	ori   r10, r10, %lo(_kernel)
+#endif /* CONFIG_KERNEL_EVENT_LOGGER_CONTEXT_SWITCH */
 
-	/* Find the next context to run. Choose _nanokernel.fiber
-	 * if non-NULL */
-	ldw r11, __tNANO_fiber_OFFSET(r10)
-	beq r11, zero, not_fiber
+	movhi r10, %hi(_kernel)
+	ori   r10, r10, %lo(_kernel)
 
-	/* _nanokernel.fiber = _nanokernel.fiber->link */
-	ldw r14, __tTCS_link_OFFSET(r11)
-	stw r14, __tNANO_fiber_OFFSET(r10)
-	br next_chosen
+	/* get cached thread to run */
+	ldw   r2, _kernel_offset_to_ready_q_cache(r10)
 
-not_fiber:
-	/* Fiber was NULL, we'll choose nanokernel.task */
-	ldw r11, __tNANO_task_OFFSET(r10)
+	/* At this point r2 points to the next thread to be swapped in */
 
-next_chosen:
-	/* Set _nanokernel.current to value we chose for r11 */
-	stw r11, __tNANO_current_OFFSET(r10)
+	/* the thread to be swapped in is now the current thread */
+	stw   r2, _kernel_offset_to_current(r10)
 
 	/* Restore callee-saved registers and switch to the incoming
 	 * thread's stack
 	 */
-	ldw r16, __tTCS_coopReg_OFFSET + __t_coop_r16_OFFSET(r11)
-	ldw r17, __tTCS_coopReg_OFFSET + __t_coop_r17_OFFSET(r11)
-	ldw r18, __tTCS_coopReg_OFFSET + __t_coop_r18_OFFSET(r11)
-	ldw r19, __tTCS_coopReg_OFFSET + __t_coop_r19_OFFSET(r11)
-	ldw r20, __tTCS_coopReg_OFFSET + __t_coop_r20_OFFSET(r11)
-	ldw r21, __tTCS_coopReg_OFFSET + __t_coop_r21_OFFSET(r11)
-	ldw r22, __tTCS_coopReg_OFFSET + __t_coop_r22_OFFSET(r11)
-	ldw r23, __tTCS_coopReg_OFFSET + __t_coop_r23_OFFSET(r11)
-	ldw r28, __tTCS_coopReg_OFFSET + __t_coop_r28_OFFSET(r11)
-	ldw ra,  __tTCS_coopReg_OFFSET + __t_coop_ra_OFFSET(r11)
-	ldw sp,  __tTCS_coopReg_OFFSET + __t_coop_sp_OFFSET(r11)
+	ldw r16, _thread_offset_to_r16(r2)
+	ldw r17, _thread_offset_to_r17(r2)
+	ldw r18, _thread_offset_to_r18(r2)
+	ldw r19, _thread_offset_to_r19(r2)
+	ldw r20, _thread_offset_to_r20(r2)
+	ldw r21, _thread_offset_to_r21(r2)
+	ldw r22, _thread_offset_to_r22(r2)
+	ldw r23, _thread_offset_to_r23(r2)
+	ldw r28, _thread_offset_to_r28(r2)
+	ldw ra,  _thread_offset_to_ra(r2)
+	ldw sp,  _thread_offset_to_sp(r2)
 
-	/* Load return value into r2 (return value register). garbage
-	 * unless someone previously called fiberRtnValueSet(). Do this
-	 * before we potentially unlock interrupts.
+	/* We need to irq_unlock(current->coopReg.key);
+	 * key was supplied as argument to _Swap(). Fetch it.
 	 */
-	ldw r2, __tTCS_coopReg_OFFSET + __t_coop_retval_OFFSET(r11)
+	ldw r3, _thread_offset_to_key(r2)
 
-	/* irq_unlock(fiber->coopReg.key);
-	 * key was supplied as argument to _Swap()
+	/*
+	 * Load return value into r2 (return value register). -EAGAIN unless
+	 * someone previously called _set_thread_return_value(). Do this before
+	 * we potentially unlock interrupts.
 	 */
-	ldw r3, __tTCS_coopReg_OFFSET + __t_coop_key_OFFSET(r11)
+	ldw r2, _thread_offset_to_retval(r2)
+
+	/* Now do  irq_unlock(current->coopReg.key) */
 #if (ALT_CPU_NUM_OF_SHADOW_REG_SETS > 0) || \
 		(defined ALT_CPU_EIC_PRESENT) || \
 		(defined ALT_CPU_MMU_PRESENT) || \

@@ -20,7 +20,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <device.h>
 #include <init.h>
@@ -36,15 +36,17 @@ typedef void (*config_func_t)(struct device *port);
 struct gpio_sam3_config {
 	volatile struct __pio	*port;
 
+	config_func_t		config_func;
+};
+
+struct gpio_sam3_runtime {
 	/* callbacks */
 	sys_slist_t		cb;
-
-	config_func_t		config_func;
 };
 
 static void _config(struct device *dev, uint32_t mask, int flags)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 
 	/* Disable the pin and return as setup is meaningless now */
 	if (flags & GPIO_PIN_DISABLE) {
@@ -68,14 +70,16 @@ static void _config(struct device *dev, uint32_t mask, int flags)
 
 			if (flags & GPIO_INT_EDGE) {
 				cfg->port->esr = mask;
-			} else if (flags & GPIO_INT_LEVEL) {
+			} else {
 				cfg->port->lsr = mask;
 			}
 
-			if (flags & GPIO_INT_ACTIVE_LOW) {
-				cfg->port->fellsr = mask;
-			} else if (flags & GPIO_INT_ACTIVE_HIGH) {
+			if (flags & GPIO_INT_ACTIVE_HIGH) {
+				/* Trigger in high level or rising edge */
 				cfg->port->rehlsr = mask;
+			} else {
+				/* Trigger in low level or falling edge */
+				cfg->port->fellsr = mask;
 			}
 		}
 	}
@@ -142,7 +146,7 @@ static int gpio_sam3_config(struct device *dev, int access_op,
 static int gpio_sam3_write(struct device *dev, int access_op,
 			   uint32_t pin, uint32_t value)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 
 	switch (access_op) {
 	case GPIO_ACCESS_BY_PIN:
@@ -183,7 +187,7 @@ static int gpio_sam3_write(struct device *dev, int access_op,
 static int gpio_sam3_read(struct device *dev, int access_op,
 				       uint32_t pin, uint32_t *value)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 
 	*value = cfg->port->pdsr;
 
@@ -203,21 +207,22 @@ static int gpio_sam3_read(struct device *dev, int access_op,
 static void gpio_sam3_isr(void *arg)
 {
 	struct device *dev = (struct device *)arg;
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
+	struct gpio_sam3_runtime *context = dev->driver_data;
 	uint32_t int_stat;
 
 	int_stat = cfg->port->isr;
 
-	_gpio_fire_callbacks(&cfg->cb, dev, int_stat);
+	_gpio_fire_callbacks(&context->cb, dev, int_stat);
 }
 
 static int gpio_sam3_manage_callback(struct device *dev,
 				     struct gpio_callback *callback,
 				     bool set)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	struct gpio_sam3_runtime *context = dev->driver_data;
 
-	_gpio_manage_callback(&cfg->cb, callback, set);
+	_gpio_manage_callback(&context->cb, callback, set);
 
 	return 0;
 }
@@ -225,7 +230,7 @@ static int gpio_sam3_manage_callback(struct device *dev,
 static int gpio_sam3_enable_callback(struct device *dev,
 				     int access_op, uint32_t pin)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 	uint32_t mask;
 
 	switch (access_op) {
@@ -247,7 +252,7 @@ static int gpio_sam3_enable_callback(struct device *dev,
 static int gpio_sam3_disable_callback(struct device *dev,
 				      int access_op, uint32_t pin)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 	uint32_t mask;
 
 	switch (access_op) {
@@ -266,7 +271,7 @@ static int gpio_sam3_disable_callback(struct device *dev,
 	return 0;
 }
 
-static struct gpio_driver_api gpio_sam3_drv_api_funcs = {
+static const struct gpio_driver_api gpio_sam3_drv_api_funcs = {
 	.config = gpio_sam3_config,
 	.write = gpio_sam3_write,
 	.read = gpio_sam3_read,
@@ -281,9 +286,9 @@ static struct gpio_driver_api gpio_sam3_drv_api_funcs = {
  * @param dev Device struct
  * @return 0 if successful, failed otherwise.
  */
-int gpio_sam3_init(struct device *dev)
+static int gpio_sam3_init(struct device *dev)
 {
-	struct gpio_sam3_config *cfg = dev->config->config_info;
+	const struct gpio_sam3_config *cfg = dev->config->config_info;
 
 	cfg->config_func(dev);
 
@@ -292,20 +297,22 @@ int gpio_sam3_init(struct device *dev)
 
 /* Port A */
 #ifdef CONFIG_GPIO_ATMEL_SAM3_PORTA
-void gpio_sam3_config_a(struct device *dev);
+static void gpio_sam3_config_a(struct device *dev);
 
-static struct gpio_sam3_config gpio_sam3_a_cfg = {
+static const struct gpio_sam3_config gpio_sam3_a_cfg = {
 	.port = __PIOA,
 
 	.config_func = gpio_sam3_config_a,
 };
 
+static struct gpio_sam3_runtime gpio_sam3_a_runtime;
+
 DEVICE_AND_API_INIT(gpio_sam3_a, CONFIG_GPIO_ATMEL_SAM3_PORTA_DEV_NAME,
-		    gpio_sam3_init, NULL, &gpio_sam3_a_cfg,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    gpio_sam3_init, &gpio_sam3_a_runtime, &gpio_sam3_a_cfg,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &gpio_sam3_drv_api_funcs);
 
-void gpio_sam3_config_a(struct device *dev)
+static void gpio_sam3_config_a(struct device *dev)
 {
 	/* Enable clock for PIO controller */
 	__PMC->pcer0 = BIT(PID_PIOA);
@@ -318,20 +325,22 @@ void gpio_sam3_config_a(struct device *dev)
 
 /* Port B */
 #ifdef CONFIG_GPIO_ATMEL_SAM3_PORTB
-void gpio_sam3_config_b(struct device *dev);
+static void gpio_sam3_config_b(struct device *dev);
 
-static struct gpio_sam3_config gpio_sam3_b_cfg = {
+static const struct gpio_sam3_config gpio_sam3_b_cfg = {
 	.port = __PIOB,
 
 	.config_func = gpio_sam3_config_b,
 };
 
+static struct gpio_sam3_runtime gpio_sam3_b_runtime;
+
 DEVICE_AND_API_INIT(gpio_sam3_b, CONFIG_GPIO_ATMEL_SAM3_PORTB_DEV_NAME,
-		    gpio_sam3_init, NULL, &gpio_sam3_b_cfg,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    gpio_sam3_init, &gpio_sam3_b_runtime, &gpio_sam3_b_cfg,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &gpio_sam3_drv_api_funcs);
 
-void gpio_sam3_config_b(struct device *dev)
+static void gpio_sam3_config_b(struct device *dev)
 {
 	/* Enable clock for PIO controller */
 	__PMC->pcer0 = BIT(PID_PIOB);
@@ -344,20 +353,22 @@ void gpio_sam3_config_b(struct device *dev)
 
 /* Port C */
 #ifdef CONFIG_GPIO_ATMEL_SAM3_PORTC
-void gpio_sam3_config_c(struct device *dev);
+static void gpio_sam3_config_c(struct device *dev);
 
-static struct gpio_sam3_config gpio_sam3_c_cfg = {
+static const struct gpio_sam3_config gpio_sam3_c_cfg = {
 	.port = __PIOC,
 
 	.config_func = gpio_sam3_config_c,
 };
 
+static struct gpio_sam3_runtime gpio_sam3_c_runtime;
+
 DEVICE_AND_API_INIT(gpio_sam3_c, CONFIG_GPIO_ATMEL_SAM3_PORTC_DEV_NAME,
-		    gpio_sam3_init, NULL, &gpio_sam3_c_cfg,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    gpio_sam3_init, &gpio_sam3_c_runtime, &gpio_sam3_c_cfg,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &gpio_sam3_drv_api_funcs);
 
-void gpio_sam3_config_c(struct device *dev)
+static void gpio_sam3_config_c(struct device *dev)
 {
 	/* Enable clock for PIO controller */
 	__PMC->pcer0 = BIT(PID_PIOC);
@@ -370,20 +381,22 @@ void gpio_sam3_config_c(struct device *dev)
 
 /* Port D */
 #ifdef CONFIG_GPIO_ATMEL_SAM3_PORTD
-void gpio_sam3_config_d(struct device *dev);
+static void gpio_sam3_config_d(struct device *dev);
 
-static struct gpio_sam3_config gpio_sam3_d_cfg = {
+static const struct gpio_sam3_config gpio_sam3_d_cfg = {
 	.port = __PIOD,
 
 	.config_func = gpio_sam3_config_d,
 };
 
+static struct gpio_sam3_runtime gpio_sam3_d_runtime;
+
 DEVICE_AND_API_INIT(gpio_sam3_d, CONFIG_GPIO_ATMEL_SAM3_PORTD_DEV_NAME,
-		    gpio_sam3_init, NULL, &gpio_sam3_d_cfg,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    gpio_sam3_init, &gpio_sam3_d_runtime, &gpio_sam3_d_cfg,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &gpio_sam3_drv_api_funcs);
 
-void gpio_sam3_config_d(struct device *dev)
+static void gpio_sam3_config_d(struct device *dev)
 {
 	/* Enable clock for PIO controller */
 	__PMC->pcer0 = BIT(PID_PIOD);

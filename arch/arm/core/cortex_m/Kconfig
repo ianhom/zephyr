@@ -45,14 +45,54 @@ config ISA_THUMB2
 	technology is featured in the  processor, and in all ARMv7
 	architecture-based processors.
 
+config CPU_CORTEX_M_HAS_BASEPRI
+	bool
+	# Omit prompt to signify "hidden" option
+	default n
+	help
+	This option signifies the CPU has the BASEPRI register.
+
+config CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS
+	bool
+	# Omit prompt to signify "hidden" option
+	default n
+	help
+	This option signifies the CPU faults other than the hard fault, and
+	needs to reserve a priority for them.
+
+config CPU_CORTEX_M0_M0PLUS
+	bool
+	# Omit prompt to signify "hidden" option
+	default n
+	select ATOMIC_OPERATIONS_C
+	select ISA_THUMB2
+	help
+	This option signifies the use of either a Cortex-M0 or Cortex-M0+ CPU.
+
 config CPU_CORTEX_M3_M4
 	bool
 	# Omit prompt to signify "hidden" option
 	default n
 	select ATOMIC_OPERATIONS_BUILTIN
 	select ISA_THUMB2
+	select CPU_CORTEX_M_HAS_BASEPRI
+	select CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS
 	help
 	This option signifies the use of either a Cortex-M3 or Cortex-M4 CPU.
+
+config CPU_CORTEX_M0
+	bool
+	# Omit prompt to signify "hidden" option
+	select CPU_CORTEX_M0_M0PLUS
+	help
+	This option signifies the use of a Cortex-M0 CPU
+
+config CPU_CORTEX_M0PLUS
+	bool
+	# Omit prompt to signify "hidden" option
+	select CPU_CORTEX_M0_M0PLUS
+	help
+	This option signifies the use of a Cortex-M0+ CPU
 
 config CPU_CORTEX_M3
 	bool
@@ -67,6 +107,17 @@ config CPU_CORTEX_M4
 	select CPU_CORTEX_M3_M4
 	help
 	This option signifies the use of a Cortex-M4 CPU
+
+config CPU_CORTEX_M7
+	bool
+	# Omit prompt to signify "hidden" option
+	default n
+	select ATOMIC_OPERATIONS_BUILTIN
+	select ISA_THUMB2
+	select CPU_CORTEX_M_HAS_BASEPRI
+	select CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS
+	help
+	This option signifies the use of a Cortex-M7 CPU
 
 menu "ARM Cortex-M options"
 	depends on CPU_CORTEX_M
@@ -103,6 +154,7 @@ config NUM_IRQ_PRIO_BITS
 config RUNTIME_NMI
 	bool
 	prompt "Attach an NMI handler at runtime"
+	select REBOOT
 	default n
 	help
 	The kernel provides a simple NMI handler that simply hangs in a tight
@@ -158,8 +210,8 @@ config FLASH_BASE_ADDRESS
 	avoid modifying it via the menu configuration.
 endmenu
 
-menu "ARM Cortex-M3/M4 options"
-	depends on CPU_CORTEX_M3_M4
+menu "ARM Cortex-M0/M0+/M3/M4/M7 options"
+	depends on CPU_CORTEX_M0_M0PLUS || CPU_CORTEX_M3_M4 || CPU_CORTEX_M7
 
 config IRQ_OFFLOAD
 	bool "Enable IRQ offload"
@@ -213,6 +265,7 @@ config ZERO_LATENCY_IRQS
 	bool
 	prompt "Enable zero-latency interrupts"
 	default n
+	depends on CPU_CORTEX_M_HAS_BASEPRI
 	help
 	Interrupt locking is done by setting exception masking to priority
 	one, thus allowing exception of priority zero to still come in. By
@@ -224,12 +277,7 @@ config ZERO_LATENCY_IRQS
 	Note that this is a somewhat dangerous option: ISRs of priority zero
 	interrupts cannot use any kernel functionality.
 
-config ARCH_HAS_TASK_ABORT
-	bool
-	# omit prompt to signify a "hidden" option
-	default y
-
-config ARCH_HAS_NANO_FIBER_ABORT
+config ARCH_HAS_THREAD_ABORT
 	bool
 	# omit prompt to signify a "hidden" option
 	default y

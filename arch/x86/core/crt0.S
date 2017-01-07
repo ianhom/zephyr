@@ -49,7 +49,7 @@
 #endif
 
 #ifdef CONFIG_SYS_POWER_DEEP_SLEEP
-	GTEXT(_sys_soc_resume)
+	GTEXT(_sys_soc_resume_from_deep_sleep)
 #endif
 
 
@@ -95,15 +95,8 @@ SECTION_FUNC(TEXT_START, __start)
 	lidt	_Idt		/* load 32-bit operand size IDT */
 
 
-#ifdef CONFIG_BOOTLOADER_UNKNOWN
-	/*
-	 * Where we do not do the protected mode switch and the
-	 * bootloader is unknown, do not make the assumption that the segment
-	 * registers are set correctly.
-	 *
-	 * This is a special case for the ia32 platform, which must work for
-	 * multiple platforms (QEMU, generic PC board, etc.). With other
-	 * platforms the bootloader is well known so assumptions can be made.
+#ifdef CONFIG_SET_GDT
+	/* If we set our own GDT, update the segment registers as well.
 	 */
 	movw	$0x10, %ax	/* data segment selector (entry = 3) */
 	movw	%ax, %ds	/* set DS */
@@ -115,7 +108,7 @@ SECTION_FUNC(TEXT_START, __start)
 	ljmp	$0x08, $__csSet	/* set CS = 0x08 */
 
 __csSet:
-#endif /* CONFIG_BOOTLOADER_UNKNOWN */
+#endif /* CONFIG_SET_GDT */
 
 
 #ifdef CONFIG_BOOT_TIME_MEASUREMENT
@@ -180,14 +173,14 @@ __csSet:
 	 * the ISR stack size are some multiple of STACK_ALIGN, which
 	 * is at least 4.
 	 *
-	 * This is also used to call the _sys_soc_resume() routine
-	 * to avoid memory corruption if the system is resuming from
-	 * deep sleep. It is important that _sys_soc_resume() restores
-	 * the stack pointer to what it was at deep sleep before
+	 * This is also used to call the _sys_soc_resume_from_deep_sleep()
+	 * routine to avoid memory corruption if the system is resuming from
+	 * deep sleep. It is important that _sys_soc_resume_from_deep_sleep()
+	 * restores the stack pointer to what it was at deep sleep before
          * enabling interrupts.  This is necessary to avoid
 	 * interfering with interrupt handler use of this stack.
-	 * If it is a cold boot then _sys_soc_resume() should not do
-	 * anything and must return immediately.
+	 * If it is a cold boot then _sys_soc_resume_from_deep_sleep() should
+	 * not do anything and must return immediately.
 	 */
 #ifdef CONFIG_INIT_STACKS
 	movl $0xAAAAAAAA, %eax
@@ -200,10 +193,11 @@ __csSet:
 	movl	$_interrupt_stack, %esp
 	addl	$CONFIG_ISR_STACK_SIZE, %esp
 
-#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+#if defined(CONFIG_SYS_POWER_DEEP_SLEEP) && \
+             !defined(CONFIG_BOOTLOADER_CONTEXT_RESTORE)
 	/*
-	 * Invoke _sys_soc_resume() hook to handle resume from deep sleep.
-	 * It should first check whether system is recovering from
+	 * Invoke _sys_soc_resume_from_deep_sleep() hook to handle resume from
+	 * deep sleep. It should first check whether system is recovering from
 	 * deep sleep state. If it is, then this function should restore
 	 * states and resume at the point system went to deep sleep.
 	 * In this case this function will never return.
@@ -213,7 +207,7 @@ __csSet:
 	 * return and execution falls through to cold boot path.
 	 */
 
-	call	_sys_soc_resume
+	call _sys_soc_resume_from_deep_sleep
 
 #endif
 
@@ -378,9 +372,10 @@ _Idt:
 	 * exceptions even if physical memory does not reside at the referenced
 	 * address.
 	 *
-	 * The 'A' (accessed) bit in the type field is _not_ set for all the
+	 * The 'A' (accessed) bit in the type field is set for all the
 	 * data/code segment descriptors to accommodate placing these entries
-	 * in ROM, since such use is not planned for this platform.
+	 * in ROM, to prevent the processor from freaking out when it tries
+	 * and fails to set it.
 	 */
 
 #ifndef CONFIG_GDT_DYNAMIC
@@ -400,7 +395,7 @@ _gdt_rom:
 	.word   0xffff		/* limit: xffff */
 	.word   0x0000		/* base : xxxx0000 */
 	.byte   0x00		/* base : xx00xxxx */
-	.byte   0x9a		/* Code e/r, Present, DPL0 */
+	.byte   0x9b		/* Accessed, Code e/r, Present, DPL0 */
 	.byte   0xcf		/* limit: fxxxx, Page Gra, 32bit */
 	.byte   0x00		/* base : 00xxxxxx */
 
@@ -409,7 +404,7 @@ _gdt_rom:
 	.word   0xffff		/* limit: xffff */
 	.word   0x0000		/* base : xxxx0000 */
 	.byte   0x00		/* base : xx00xxxx */
-	.byte   0x92		/* Data r/w, Present, DPL0 */
+	.byte   0x93		/* Accessed, Data r/w, Present, DPL0 */
 	.byte   0xcf		/* limit: fxxxx, Page Gra, 32bit */
 	.byte   0x00		/* base : 00xxxxxx */
 

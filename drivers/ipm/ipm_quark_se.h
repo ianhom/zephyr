@@ -20,7 +20,7 @@
 #ifndef __INCquark_se_mailboxh
 #define __INCquark_se_mailboxh
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <board.h> /* for SCSS_REGISTER_BASE */
 #include <ipm.h>
 #include <device.h>
@@ -119,7 +119,7 @@ struct quark_se_ipm_driver_data {
 	void *callback_ctx;
 };
 
-struct ipm_driver_api ipm_quark_se_api_funcs;
+const struct ipm_driver_api ipm_quark_se_api_funcs;
 
 void quark_se_ipm_isr(void *param);
 
@@ -136,7 +136,7 @@ int quark_se_ipm_controller_initialize(struct device *d);
 	DEVICE_AND_API_INIT(name, _STRINGIFY(name), quark_se_ipm_initialize, \
 			    &quark_se_ipm_runtime_##name, \
 			    &quark_se_ipm_config_##name, \
-			    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, \
+			    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, \
 			    &ipm_quark_se_api_funcs)
 
 #ifdef __cplusplus

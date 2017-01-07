@@ -114,10 +114,7 @@
 
 #include <device.h>
 #include <gpio.h>
-#include <sys_clock.h>
 #include <misc/util.h>
-
-#define SLEEPTICKS	SECONDS(1)
 
 #if defined(CONFIG_SOC_QUARK_SE_C1000_SS)
 #define GPIO_OUT_PIN	2
@@ -139,8 +136,10 @@
 
 #if defined(CONFIG_GPIO_DW_0)
 #define GPIO_DRV_NAME CONFIG_GPIO_DW_0_NAME
-#elif defined(CONFIG_GPIO_QMSI_0)
+#elif defined(CONFIG_GPIO_QMSI_0) && defined(CONFIG_SOC_QUARK_SE_C1000)
 #define GPIO_DRV_NAME CONFIG_GPIO_QMSI_0_NAME
+#elif defined(CONFIG_GPIO_QMSI_SS_0)
+#define GPIO_DRV_NAME CONFIG_GPIO_QMSI_SS_0_NAME
 #elif defined(CONFIG_GPIO_ATMEL_SAM3)
 #define GPIO_DRV_NAME CONFIG_GPIO_ATMEL_SAM3_PORTB_DEV_NAME
 #else
@@ -157,17 +156,14 @@ static struct gpio_callback gpio_cb;
 
 void main(void)
 {
-	struct nano_timer timer;
-	void *timer_data[1];
 	struct device *gpio_dev;
 	int ret;
 	int toggle = 1;
 
-	nano_timer_init(&timer, timer_data);
-
 	gpio_dev = device_get_binding(GPIO_DRV_NAME);
 	if (!gpio_dev) {
 		printk("Cannot find %s!\n", GPIO_DRV_NAME);
+		return;
 	}
 
 	/* Setup GPIO output */
@@ -210,7 +206,6 @@ void main(void)
 			toggle = 1;
 		}
 
-		nano_timer_start(&timer, SLEEPTICKS);
-		nano_timer_test(&timer, TICKS_UNLIMITED);
+		k_sleep(MSEC_PER_SEC);
 	}
 }

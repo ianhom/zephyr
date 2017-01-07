@@ -20,51 +20,89 @@
 #include <power.h>
 #include <soc_power.h>
 
-#define _DEEP_SLEEP_MODE		0xDEEBDEEB
-#define _LOW_POWER_MODE			0xD02ED02E
+#include "power_states.h"
 
-/* GPS1 is reserved for PM use */
-#define _GPS1	0xb0800104
+#define _REG_TIMER_ICR ((volatile uint32_t *) \
+			(CONFIG_LOAPIC_BASE_ADDRESS + LOAPIC_TIMER_ICR))
 
 /* Variables used to save CPU state */
 uint64_t _pm_save_gdtr;
 uint64_t _pm_save_idtr;
 uint32_t _pm_save_esp;
 
-#if (defined(CONFIG_SYS_POWER_LOW_POWER_STATE) || \
-	defined(CONFIG_SYS_POWER_DEEP_SLEEP) || \
-	defined(CONFIG_DEVICE_POWER_MANAGEMENT))
-void _sys_soc_set_power_policy(uint32_t pm_policy)
+extern void _power_soc_sleep(void);
+extern void _power_restore_cpu_context(void);
+extern void _power_soc_deep_sleep(void);
+
+#if (defined(CONFIG_SYS_POWER_DEEP_SLEEP))
+static uint32_t  *__x86_restore_info = (uint32_t *)CONFIG_BSP_SHARED_RAM_ADDR;
+
+static void _deep_sleep(enum power_states state)
 {
-	switch (pm_policy) {
-	case SYS_PM_DEEP_SLEEP:
-		sys_write32(_DEEP_SLEEP_MODE, _GPS1);
+	/*
+	 * Setting resume vector inside the restore_cpu_context
+	 * function since we have nothing to do before cpu context
+	 * is restored. If necessary, it is possible to set the
+	 * resume vector to a location where additional processing
+	 * can be done before cpu context is restored and control
+	 * transferred to _sys_soc_suspend.
+	 */
+	qm_x86_set_resume_vector(_power_restore_cpu_context,
+				 *__x86_restore_info);
+
+	power_soc_set_x86_restore_flag();
+
+	switch (state) {
+	case SYS_POWER_STATE_DEEP_SLEEP_1:
+		_power_soc_sleep();
 		break;
-	case SYS_PM_LOW_POWER_STATE:
-		sys_write32(_LOW_POWER_MODE, _GPS1);
-		break;
-	case SYS_PM_ACTIVE_STATE:
-		sys_write32(0, _GPS1);
+	case SYS_POWER_STATE_DEEP_SLEEP:
+		_power_soc_deep_sleep();
 		break;
 	default:
-		__ASSERT(0, "Unknown PM policy");
+		break;
+	}
+}
+#endif
+
+void _sys_soc_set_power_state(enum power_states state)
+{
+	switch (state) {
+	case SYS_POWER_STATE_CPU_LPS:
+		power_cpu_c2lp();
+		break;
+	case SYS_POWER_STATE_CPU_LPS_1:
+		power_cpu_c2();
+		break;
+	case SYS_POWER_STATE_CPU_LPS_2:
+		power_cpu_c1();
+		break;
+#if (defined(CONFIG_SYS_POWER_DEEP_SLEEP))
+	case SYS_POWER_STATE_DEEP_SLEEP:
+	case SYS_POWER_STATE_DEEP_SLEEP_1:
+		_deep_sleep(state);
+		break;
+#endif
+	default:
 		break;
 	}
 }
 
-int _sys_soc_get_power_policy(void)
+void _sys_soc_power_state_post_ops(enum power_states state)
 {
-	uint32_t mode;
-
-	mode = sys_read32(_GPS1);
-
-	switch (mode) {
-	case _DEEP_SLEEP_MODE:
-		return SYS_PM_DEEP_SLEEP;
-	case _LOW_POWER_MODE:
-		return SYS_PM_LOW_POWER_STATE;
-	}
-
-	return SYS_PM_ACTIVE_STATE;
-}
+	switch (state) {
+	case SYS_POWER_STATE_CPU_LPS:
+		*_REG_TIMER_ICR = 1;
+	case SYS_POWER_STATE_CPU_LPS_1:
+		__asm__ volatile("sti");
+		break;
+#if (defined(CONFIG_SYS_POWER_DEEP_SLEEP))
+	case SYS_POWER_STATE_DEEP_SLEEP:
+	case SYS_POWER_STATE_DEEP_SLEEP_1:
+		__asm__ volatile("sti");
+		break;
 #endif
+	default:
+		break;
+	}
+}

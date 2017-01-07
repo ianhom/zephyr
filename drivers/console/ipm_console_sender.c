@@ -18,7 +18,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <misc/printk.h>
 #include <ipm.h>
 #include <console/ipm_console.h>
@@ -65,4 +65,3 @@ int ipm_console_sender_init(struct device *d)
 
 	return 0;
 }
-

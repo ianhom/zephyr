@@ -18,14 +18,13 @@
  * @file
  * @brief New thread creation for ARCv2
  *
- * Core nanokernel fiber related primitives for the ARCv2 processor
- * architecture.
+ * Core thread related primitives for the ARCv2 processor architecture.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <toolchain.h>
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 #include <wait_q.h>
 #ifdef CONFIG_INIT_STACKS
 #include <string.h>
@@ -40,46 +39,29 @@ struct init_stack_frame {
 	uint32_t r0;
 };
 
-tNANO _nanokernel = {0};
-
-#if defined(CONFIG_THREAD_MONITOR)
-#define THREAD_MONITOR_INIT(tcs) thread_monitor_init(tcs)
-#else
-#define THREAD_MONITOR_INIT(tcs) \
-	do {/* do nothing */     \
-	} while ((0))
-#endif
-
 #if defined(CONFIG_THREAD_MONITOR)
 /*
- * @brief Initialize thread monitoring support
- *
- * Currently only inserts the new thread in the list of active threads.
- *
- * @return N/A
+ * Add a thread to the kernel's list of active threads.
  */
-
-static ALWAYS_INLINE void thread_monitor_init(struct tcs *tcs)
+static ALWAYS_INLINE void thread_monitor_init(struct k_thread *thread)
 {
 	unsigned int key;
 
-	/*
-	 * Add the newly initialized thread to head of the list of threads.  This
-	 * singly linked list of threads maintains ALL the threads in the system:
-	 * both tasks and fibers regardless of whether they are runnable.
-	 */
-
 	key = irq_lock();
-	tcs->next_thread = _nanokernel.threads;
-	_nanokernel.threads = tcs;
+	thread->next_thread = _kernel.threads;
+	_kernel.threads = thread;
 	irq_unlock(key);
 }
+#else
+#define thread_monitor_init(thread) \
+	do {/* do nothing */     \
+	} while ((0))
 #endif /* CONFIG_THREAD_MONITOR */
 
 /*
  * @brief Initialize a new thread from its stack space
  *
- * The control structure (TCS) is put at the lower address of the stack. An
+ * The thread control structure is put at the lower address of the stack. An
  * initial context, to be "restored" by __return_from_coop(), is put at
  * the other end of the stack, and thus reusable by the stack when not
  * needed anymore.
@@ -96,20 +78,22 @@ static ALWAYS_INLINE void thread_monitor_init(struct tcs *tcs)
  * @param parameter1 first param to entry point
  * @param parameter2 second param to entry point
  * @param parameter3 third param to entry point
- * @param fiber priority, -1 for task
- * @param options is unused (saved for future expansion)
+ * @param priority thread priority
+ * @param options thread options: K_ESSENTIAL
  *
  * @return N/A
  */
-void _new_thread(char *pStackMem, unsigned stackSize,
-		 void *uk_task_ptr, _thread_entry_t pEntry,
+void _new_thread(char *pStackMem, size_t stackSize,
+		 _thread_entry_t pEntry,
 		 void *parameter1, void *parameter2, void *parameter3,
 		 int priority, unsigned options)
 {
+	_ASSERT_VALID_PRIO(priority, pEntry);
+
 	char *stackEnd = pStackMem + stackSize;
 	struct init_stack_frame *pInitCtx;
 
-	struct tcs *tcs = (struct tcs *) pStackMem;
+	struct k_thread *thread = (struct k_thread *) pStackMem;
 
 #ifdef CONFIG_INIT_STACKS
 	memset(pStackMem, 0xaa, stackSize);
@@ -134,32 +118,29 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	 */
 #ifdef CONFIG_ARC_STACK_CHECKING
 	pInitCtx->status32 = _ARC_V2_STATUS32_SC | _ARC_V2_STATUS32_E(_ARC_V2_DEF_IRQ_LEVEL);
-	tcs->stack_top = (uint32_t) stackEnd;
+	thread->arch.stack_top = (uint32_t) stackEnd;
 #else
 	pInitCtx->status32 = _ARC_V2_STATUS32_E(_ARC_V2_DEF_IRQ_LEVEL);
 #endif
-	tcs->link = NULL;
-	tcs->flags = priority == -1 ? TASK | PREEMPTIBLE : FIBER;
-	tcs->prio = priority;
+
+	_init_thread_base(&thread->base, priority, K_PRESTART, options);
+
+	/* static threads overwrite them afterwards with real values */
+	thread->init_data = NULL;
+	thread->fn_abort = NULL;
 
 #ifdef CONFIG_THREAD_CUSTOM_DATA
 	/* Initialize custom data field (value is opaque to kernel) */
 
-	tcs->custom_data = NULL;
+	thread->custom_data = NULL;
 #endif
 
 #ifdef CONFIG_THREAD_MONITOR
 	/*
-	 * In debug mode tcs->entry give direct access to the thread entry
+	 * In debug mode thread->entry give direct access to the thread entry
 	 * and the corresponding parameters.
 	 */
-	tcs->entry = (struct __thread_entry *)(pInitCtx);
-#endif
-
-#ifdef CONFIG_MICROKERNEL
-	tcs->uk_task_ptr = uk_task_ptr;
-#else
-	ARG_UNUSED(uk_task_ptr);
+	thread->entry = (struct __thread_entry *)(pInitCtx);
 #endif
 
 	/*
@@ -168,13 +149,12 @@ void _new_thread(char *pStackMem, unsigned stackSize,
 	 * dst[31:6] dst[5] dst[4]       dst[3:0]
 	 *    26'd0    1    STATUS32.IE  STATUS32.E[3:0]
 	 */
-	tcs->intlock_key = 0x3F;
-	tcs->relinquish_cause = _CAUSE_COOP;
-	tcs->preempReg.sp = (uint32_t)pInitCtx - __tCalleeSaved_SIZEOF;
+	thread->arch.intlock_key = 0x3F;
+	thread->arch.relinquish_cause = _CAUSE_COOP;
+	thread->callee_saved.sp =
+		(uint32_t)pInitCtx - ___callee_saved_stack_t_SIZEOF;
 
-	_nano_timeout_tcs_init(tcs);
+	/* initial values in all other regs/k_thread entries are irrelevant */
 
-	/* initial values in all other registers/TCS entries are irrelevant */
-
-	THREAD_MONITOR_INIT(tcs);
+	thread_monitor_init(thread);
 }

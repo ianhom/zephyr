@@ -39,6 +39,28 @@
 extern "C" {
 #endif
 
+/* XXX the easiest way to trigger a warning on a preprocessor macro
+ * is to use _Pragma("GCC warning \"...\"), however it's impossible to filter
+ * those out of -Werror, needed for sanitycheck. So we do this nastiness
+ * instead. These functions get compiled but don't take up extra space in
+ * the binary..
+ */
+static __deprecated const int _INIT_LEVEL_PRIMARY = 1;
+static __deprecated const int _INIT_LEVEL_SECONDARY = 1;
+static __deprecated const int _INIT_LEVEL_NANOKERNEL = 1;
+static __deprecated const int _INIT_LEVEL_MICROKERNEL = 1;
+static const int _INIT_LEVEL_PRE_KERNEL_1 = 1;
+static const int _INIT_LEVEL_PRE_KERNEL_2 = 1;
+static const int _INIT_LEVEL_POST_KERNEL = 1;
+static const int _INIT_LEVEL_APPLICATION = 1;
+
+#define _DEPRECATION_CHECK(dev_name, level) \
+	static inline void _CONCAT(_deprecation_check_, dev_name)() \
+	{ \
+		int foo = _CONCAT(_INIT_LEVEL_, level); \
+		(void)foo; \
+	}
+
 /**
  * @def DEVICE_INIT
  *
@@ -63,19 +85,16 @@ extern "C" {
  * Must be one of the following symbols, which are listed in the order
  * they are performed by the kernel:
  * \n
- * \li PRIMARY: Used for devices that have no dependencies, such as those
+ * \li PRE_KERNEL_1: Used for devices that have no dependencies, such as those
  * that rely solely on hardware present in the processor/SOC. These devices
  * cannot use any kernel services during configuration, since they are not
  * yet available.
  * \n
- * \li SECONDARY: Used for devices that rely on the initialization of devices
+ * \li PRE_KERNEL_2: Used for devices that rely on the initialization of devices
  * initialized as part of the PRIMARY level. These devices cannot use any
  * kernel services during configuration, since they are not yet available.
  * \n
- * \li NANOKERNEL: Used for devices that require nanokernel services during
- * configuration.
- * \n
- * \li MICROKERNEL: Used for devices that require microkernel services during
+ * \li POST_KERNEL: Used for devices that require kernel services during
  * configuration.
  * \n
  * \li APPLICATION: Used for application components (i.e. non-kernel components)
@@ -113,7 +132,7 @@ extern "C" {
 		.name = drv_name, .init = (init_fn), \
 		.config_info = (cfg_info) \
 	}; \
-	\
+	_DEPRECATION_CHECK(dev_name, level) \
 	static struct device _CONCAT(__device_, dev_name) __used \
 	__attribute__((__section__(".init_" #level STRINGIFY(prio)))) = { \
 		 .config = &_CONCAT(__config_, dev_name), \
@@ -126,7 +145,7 @@ extern "C" {
 	DEVICE_AND_API_INIT(dev_name, drv_name, init_fn, data, cfg_info, \
 			    level, prio, api)
 
-#define DEVICE_DEFINE(dev_name, drv_name, init_fn, control_fn, \
+#define DEVICE_DEFINE(dev_name, drv_name, init_fn, pm_control_fn, \
 		      data, cfg_info, level, prio, api) \
 	DEVICE_AND_API_INIT(dev_name, drv_name, init_fn, data, cfg_info, \
 			    level, prio, api)
@@ -168,7 +187,7 @@ extern "C" {
 		.dev_pm_ops = (device_pm_ops), \
 		.config_info = (cfg_info) \
 	}; \
-	\
+	_DEPRECATION_CHECK(dev_name, level) \
 	static struct device _CONCAT(__device_, dev_name) __used \
 	__attribute__((__section__(".init_" #level STRINGIFY(prio)))) = { \
 		 .config = &_CONCAT(__config_, dev_name), \
@@ -180,25 +199,24 @@ extern "C" {
 * @def DEVICE_DEFINE
 *
 * @brief Create device object and set it up for boot time initialization,
-* with the option to device_control.
+* with the option to device_pm_control.
 *
 * @copydetails DEVICE_AND_API_INIT
-* @param control_fn Provides an initial pointer to the API function
-* used by App to send control command to the driver.
-* Can be empty function (device_control_nop) for not implementing.
+* @param pm_control_fn Pointer to device_pm_control function.
+* Can be empty function (device_pm_control_nop) if not implemented.
 */
 extern struct device_pm_ops device_pm_ops_nop;
-#define DEVICE_DEFINE(dev_name, drv_name, init_fn, control_fn, \
+#define DEVICE_DEFINE(dev_name, drv_name, init_fn, pm_control_fn, \
 		      data, cfg_info, level, prio, api) \
 	\
 	static struct device_config _CONCAT(__config_, dev_name) __used \
 	__attribute__((__section__(".devconfig.init"))) = { \
 		.name = drv_name, .init = (init_fn), \
-		.device_control = (control_fn), \
+		.device_pm_control = (pm_control_fn), \
 		.dev_pm_ops = (&device_pm_ops_nop), \
 		.config_info = (cfg_info) \
 	}; \
-	\
+	_DEPRECATION_CHECK(dev_name, level) \
 	static struct device _CONCAT(__device_, dev_name) __used \
 	__attribute__((__section__(".init_" #level STRINGIFY(prio)))) = { \
 		 .config = &_CONCAT(__config_, dev_name), \
@@ -206,14 +224,14 @@ extern struct device_pm_ops device_pm_ops_nop;
 		 .driver_data = data \
 	}
 /*
- * Use the default device_control for devices that do not call the
+ * Use the default device_pm_control for devices that do not call the
  * DEVICE_DEFINE macro so that caller of hook functions
- * need not check device_control != NULL.
+ * need not check device_pm_control != NULL.
  */
 #define DEVICE_AND_API_INIT(dev_name, drv_name, init_fn, data, cfg_info, \
 			    level, prio, api) \
 	DEVICE_DEFINE(dev_name, drv_name, init_fn, \
-		      device_control_nop, data, cfg_info, level, \
+		      device_pm_control_nop, data, cfg_info, level, \
 		      prio, api)
 #endif
 
@@ -386,10 +404,10 @@ struct device_config {
 	int (*init)(struct device *device);
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
 	struct device_pm_ops *dev_pm_ops; /* deprecated */
-	int (*device_control)(struct device *device, uint32_t command,
+	int (*device_pm_control)(struct device *device, uint32_t command,
 			      void *context);
 #endif
-	void *config_info;
+	const void *config_info;
 };
 
 /**
@@ -401,7 +419,7 @@ struct device_config {
  */
 struct device {
 	struct device_config *config;
-	void *driver_api;
+	const void *driver_api;
 	void *driver_data;
 };
 
@@ -516,7 +534,7 @@ static inline int __deprecated device_resume(struct device *device,
  * @brief No-op function to initialize unimplemented hook
  *
  * This function should be used to initialize device hook
- * for which a device has no operation.
+ * for which a device has no PM operations.
  *
  * @param unused_device Unused
  * @param unused_ctrl_command Unused
@@ -524,7 +542,7 @@ static inline int __deprecated device_resume(struct device *device,
  *
  * @retval 0 Always returns 0
  */
-int device_control_nop(struct device *unused_device,
+int device_pm_control_nop(struct device *unused_device,
 		       uint32_t unused_ctrl_command, void *unused_context);
 /**
  * @brief Call the set power state function of a device
@@ -541,7 +559,7 @@ int device_control_nop(struct device *unused_device,
 static inline int device_set_power_state(struct device *device,
 					 uint32_t device_power_state)
 {
-	return device->config->device_control(device,
+	return device->config->device_pm_control(device,
 			DEVICE_PM_SET_POWER_STATE, &device_power_state);
 }
 
@@ -561,7 +579,7 @@ static inline int device_set_power_state(struct device *device,
 static inline int device_get_power_state(struct device *device,
 					 uint32_t *device_power_state)
 {
-	return device->config->device_control(device,
+	return device->config->device_pm_control(device,
 				DEVICE_PM_GET_POWER_STATE, device_power_state);
 }
 
@@ -612,14 +630,7 @@ int device_busy_check(struct device *chk_dev);
  * Synchronous calls API
  */
 
-#ifdef CONFIG_KERNEL_V2
 #include <kernel.h>
-#else
-#include <nanokernel.h>
-#ifdef CONFIG_MICROKERNEL
-#include <microkernel.h>
-#endif
-#endif
 #include <stdbool.h>
 
 /**
@@ -627,7 +638,7 @@ int device_busy_check(struct device *chk_dev);
  */
 typedef struct {
 	/** Nanokernel semaphore used for fiber context */
-	struct nano_sem f_sem;
+	struct k_sem f_sem;
 } device_sync_call_t;
 
 
@@ -636,9 +647,9 @@ typedef struct {
  *
  * @param sync A pointer to a valid device_sync_call_t
  */
-static inline void device_sync_call_init(device_sync_call_t *sync)
+static inline void __deprecated device_sync_call_init(device_sync_call_t *sync)
 {
-	nano_sem_init(&sync->f_sem);
+	k_sem_init(&sync->f_sem, 0, UINT_MAX);
 }
 
 /**
@@ -647,9 +658,9 @@ static inline void device_sync_call_init(device_sync_call_t *sync)
  *
  * @param sync A pointer to a valid device_sync_call_t
  */
-static inline void device_sync_call_wait(device_sync_call_t *sync)
+static inline void __deprecated device_sync_call_wait(device_sync_call_t *sync)
 {
-	nano_sem_take(&sync->f_sem, TICKS_UNLIMITED);
+	k_sem_take(&sync->f_sem, K_FOREVER);
 }
 
 /**
@@ -658,9 +669,10 @@ static inline void device_sync_call_wait(device_sync_call_t *sync)
  *
  * @param sync A pointer to a valid device_sync_call_t
  */
-static inline void device_sync_call_complete(device_sync_call_t *sync)
+static inline void __deprecated
+		   device_sync_call_complete(device_sync_call_t *sync)
 {
-	nano_sem_give(&sync->f_sem);
+	k_sem_give(&sync->f_sem);
 }
 
 #ifdef __cplusplus

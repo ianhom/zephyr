@@ -15,7 +15,7 @@
  */
 
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <arch/cpu.h>
 #include <uart.h>
 #include <sys_io.h>
@@ -91,7 +91,7 @@ static int uart_altera_jtag_init(struct device *dev)
 }
 
 
-static struct uart_driver_api uart_altera_jtag_driver_api = {
+static const struct uart_driver_api uart_altera_jtag_driver_api = {
 	.poll_in = NULL,
 	.poll_out = &uart_altera_jtag_poll_out,
 	.err_check = NULL,
@@ -102,7 +102,7 @@ static struct uart_driver_api uart_altera_jtag_driver_api = {
 #endif
 };
 
-static struct uart_device_config uart_altera_jtag_dev_cfg_0 = {
+static const struct uart_device_config uart_altera_jtag_dev_cfg_0 = {
 	.base = (void *)JTAG_UART_0_BASE,
 	.sys_clk_freq = 0, /* Unused */
 };
@@ -110,5 +110,5 @@ static struct uart_device_config uart_altera_jtag_dev_cfg_0 = {
 DEVICE_AND_API_INIT(uart_altera_jtag_0, "jtag_uart0",
 		    uart_altera_jtag_init, NULL,
 		    &uart_altera_jtag_dev_cfg_0,
-		    PRIMARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
-		    (void *)&uart_altera_jtag_driver_api);
+		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    &uart_altera_jtag_driver_api);

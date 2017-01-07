@@ -22,25 +22,11 @@
  * supported platforms.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <toolchain.h>
 #include <sections.h>
-
-#ifdef CONFIG_KERNEL_V2
-#include <nano_private.h> /* to get access to '_current' */
-#endif
-
-/* override PRINTK from nano_private.h */
-#if defined(CONFIG_KERNEL_V2) && defined(PRINTK)
-#undef PRINTK
-#endif
-
-#ifdef CONFIG_PRINTK
+#include <kernel_structs.h>
 #include <misc/printk.h>
-#define PRINTK(...) printk(__VA_ARGS__)
-#else
-#define PRINTK(...)
-#endif /* CONFIG_PRINTK */
 
 /**
  *
@@ -63,43 +49,25 @@
  * @return This function does not return.
  */
 FUNC_NORETURN void _SysFatalErrorHandler(unsigned int reason,
-					 const NANO_ESF * pEsf)
+					 const NANO_ESF *pEsf)
 {
-	nano_context_type_t curCtx = sys_execution_context_type_get();
-
 	ARG_UNUSED(reason);
 	ARG_UNUSED(pEsf);
 
-	if ((curCtx != NANO_CTX_ISR) && !_is_thread_essential()) {
-#ifdef CONFIG_MICROKERNEL
-		if (curCtx == NANO_CTX_TASK) {
-			extern FUNC_NORETURN void _TaskAbort(void);
-			PRINTK("Fatal task error! Aborting task.\n");
-#ifdef CONFIG_KERNEL_V2
-			k_thread_abort(_current);
-#else
-			_TaskAbort();
-#endif
-		} else
-#endif /* CONFIG_MICROKERNEL */
-		{
-			PRINTK("Fatal fiber error! Aborting fiber.\n");
-			fiber_abort();
-		}
-	} else {
-#ifdef CONFIG_PRINTK
-		/*
-		 * Conditionalize the ctxText[] definition to prevent an "unused
-		 * variable" warning when the PRINTK kconfig option is disabled.
-		 */
-
-		static const char * const ctxText[] = {"ISR", "essential fiber",
-					  "essential task"};
-
-		PRINTK("Fatal %s error! Spinning...\n", ctxText[curCtx]);
-#endif /* CONFIG_PRINTK */
+#if !defined(CONFIG_SIMPLE_FATAL_ERROR_HANDLER)
+	if (k_is_in_isr() || _is_thread_essential()) {
+		printk("Fatal fault in %s! Spinning...\n",
+		       k_is_in_isr() ? "ISR" : "essential thread");
+		for (;;)
+			; /* spin forever */
 	}
+	printk("Fatal fault in thread %p! Aborting.\n", _current);
+	k_thread_abort(_current);
+#else
+	for (;;) {
+		k_cpu_idle();
+	}
+#endif
 
-	do {
-	} while (1);
+	CODE_UNREACHABLE;
 }

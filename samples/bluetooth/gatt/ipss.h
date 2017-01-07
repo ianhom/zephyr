@@ -18,6 +18,13 @@
  * limitations under the License.
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void ipss_init(void);
 int ipss_advertise(void);
-int ipss_listen(void);
+
+#ifdef __cplusplus
+}
+#endif

@@ -21,30 +21,11 @@
  * This module provides the _SysFatalErrorHandler() routine for ARCv2 BSPs.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <toolchain.h>
 #include <sections.h>
-
-#ifdef CONFIG_PRINTK
+#include <kernel_structs.h>
 #include <misc/printk.h>
-#define PRINTK(...) printk(__VA_ARGS__)
-#else
-#define PRINTK(...)
-#endif
-
-#ifdef CONFIG_MICROKERNEL
-extern void _TaskAbort(void);
-static inline void nonEssentialTaskAbort(void)
-{
-	PRINTK("Fatal fault in task ! Aborting task.\n");
-	_TaskAbort();
-}
-#define NON_ESSENTIAL_TASK_ABORT() nonEssentialTaskAbort()
-#else
-#define NON_ESSENTIAL_TASK_ABORT() \
-	do {/* nothing */          \
-	} while ((0))
-#endif
 
 /**
  *
@@ -66,28 +47,26 @@ static inline void nonEssentialTaskAbort(void)
  *
  * @return N/A
  */
-void _SysFatalErrorHandler(unsigned int reason, const NANO_ESF * pEsf)
+FUNC_NORETURN void _SysFatalErrorHandler(unsigned int reason,
+					 const NANO_ESF *pEsf)
 {
-	nano_context_type_t curCtx = sys_execution_context_type_get();
-
 	ARG_UNUSED(reason);
 	ARG_UNUSED(pEsf);
 
-	if ((curCtx == NANO_CTX_ISR) || _is_thread_essential()) {
-		PRINTK("Fatal fault in %s ! Spinning...\n",
-		       NANO_CTX_ISR == curCtx
-			       ? "ISR"
-			       : NANO_CTX_FIBER == curCtx ? "essential fiber"
-							  : "essential task");
+#if !defined(CONFIG_SIMPLE_FATAL_ERROR_HANDLER)
+	if (k_is_in_isr() || _is_thread_essential()) {
+		printk("Fatal fault in %s! Spinning...\n",
+		       k_is_in_isr() ? "ISR" : "essential thread");
 		for (;;)
 			; /* spin forever */
 	}
-
-	if (NANO_CTX_FIBER == curCtx) {
-		PRINTK("Fatal fault in fiber ! Aborting fiber.\n");
-		fiber_abort();
-		return;
+	printk("Fatal fault in thread %p! Aborting.\n", _current);
+	k_thread_abort(_current);
+#else
+	for (;;) {
+		k_cpu_idle();
 	}
+#endif
 
-	NON_ESSENTIAL_TASK_ABORT();
+	CODE_UNREACHABLE;
 }

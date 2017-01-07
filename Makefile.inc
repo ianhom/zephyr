@@ -13,7 +13,7 @@ PROJECT_BASE ?= $(CURDIR)
 endif
 
 ifdef BOARD
-KBUILD_DEFCONFIG_PATH=$(wildcard $(ZEPHYR_BASE)/boards/*/$(BOARD)_defconfig)
+KBUILD_DEFCONFIG_PATH=$(wildcard $(ZEPHYR_BASE)/boards/*/*/$(BOARD)_defconfig)
 ifeq ($(KBUILD_DEFCONFIG_PATH),)
 $(error Board $(BOARD) not found!)
 endif
@@ -44,7 +44,6 @@ endif
 
 export ARCH MDEF_FILE QEMU_EXTRA_FLAGS PROJECT_BASE
 
-KERNEL_TYPE ?= micro
 override CONF_FILE := $(strip $(subst $(DQUOTE),,$(CONF_FILE)))
 
 SOURCE_DIR ?= $(PROJECT_BASE)/src/
@@ -100,7 +99,8 @@ flash: $(DOTCONFIG)
 	$(Q)$(call zephyrmake,$(O),$@)
 
 ifeq ($(MAKECMDGOALS),debugserver)
--include $(ZEPHYR_BASE)/boards/$(BOARD)/Makefile.board
+ARCH = $(notdir $(subst /$(BOARD),,$(wildcard $(ZEPHYR_BASE)/boards/*/$(BOARD))))
+-include $(ZEPHYR_BASE)/boards/$(ARCH)/$(BOARD)/Makefile.board
 -include $(ZEPHYR_BASE)/scripts/Makefile.toolchain.$(ZEPHYR_GCC_VARIANT)
 BOARD_NAME = $(BOARD)
 export BOARD_NAME
@@ -109,7 +109,7 @@ debugserver: FORCE
 	$(Q)$(CONFIG_SHELL) $(ZEPHYR_BASE)/scripts/support/$(FLASH_SCRIPT) debugserver
 
 
-initconfig: $(DOTCONFIG)
+initconfig outputexports: $(DOTCONFIG)
 
 $(BOARDCONFIG):
 	@rm -f $(O)/.board_*
@@ -132,11 +132,11 @@ help:
 %:
 	$(Q)$(call zephyrmake,$(O),$@)
 
-KERNEL_CONFIG = $(ZEPHYR_BASE)/kernel/configs/$(KERNEL_TYPE).config
+OVERLAY_CONFIG += $(ZEPHYR_BASE)/kernel/configs/kernel.config
 
 $(DOTCONFIG): $(BOARDCONFIG) $(KBUILD_DEFCONFIG_PATH) $(CONF_FILE)
 	$(Q)$(CONFIG_SHELL) $(ZEPHYR_BASE)/scripts/kconfig/merge_config.sh \
-		-q -m -O $(O) $(KBUILD_DEFCONFIG_PATH) $(KERNEL_CONFIG) $(CONF_FILE) \
+		-q -m -O $(O) $(KBUILD_DEFCONFIG_PATH) $(OVERLAY_CONFIG) $(CONF_FILE) \
 			      $(wildcard $(O)/*.conf)
 	$(Q)$(MAKE) $(S) -C $(ZEPHYR_BASE) O=$(O) PROJECT=$(PROJECT_BASE) oldnoconfig
 

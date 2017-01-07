@@ -34,7 +34,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <board.h>
 #include <i2c.h>
@@ -45,7 +45,7 @@
 #include "i2c_atmel_sam3.h"
 
 #define SYS_LOG_LEVEL CONFIG_SYS_LOG_I2C_LEVEL
-#include <misc/sys_log.h>
+#include <logging/sys_log.h>
 
 /* for use with dev_data->state */
 #define STATE_READY		0
@@ -69,7 +69,7 @@ struct i2c_sam3_dev_config {
 };
 
 struct i2c_sam3_dev_data {
-	device_sync_call_t	sync;
+	struct k_sem		device_sync_sem;
 	union dev_config	dev_config;
 
 	volatile uint32_t	state;
@@ -196,7 +196,7 @@ static uint32_t clk_div_calc(struct device *dev)
 
 static int i2c_sam3_runtime_configure(struct device *dev, uint32_t config)
 {
-	struct i2c_sam3_dev_config * const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config * const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 	uint32_t reg;
 	uint32_t clk;
@@ -227,7 +227,7 @@ static int i2c_sam3_runtime_configure(struct device *dev, uint32_t config)
 static void i2c_sam3_isr(void *arg)
 {
 	struct device * const dev = (struct device *)arg;
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 
 	/* Disable all interrupts so they can be processed
@@ -235,7 +235,7 @@ static void i2c_sam3_isr(void *arg)
 	 */
 	cfg->port->idr = TWI_IRQ_DISABLE;
 
-	device_sync_call_complete(&dev_data->sync);
+	k_sem_give(&dev_data->device_sync_sem);
 }
 
 /* This should be used ONLY IF <bits> are the only bits of concern.
@@ -244,7 +244,7 @@ static void i2c_sam3_isr(void *arg)
  */
 static inline void sr_bits_set_wait(struct device *dev, uint32_t bits)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 
 	while (!(cfg->port->sr & bits)) {
 		/* loop till <bits> are set */
@@ -254,7 +254,7 @@ static inline void sr_bits_set_wait(struct device *dev, uint32_t bits)
 /* Clear the status registers from previous transfers */
 static inline void status_reg_clear(struct device *dev)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	uint32_t stat_reg;
 
 	do {
@@ -280,7 +280,7 @@ static inline void status_reg_clear(struct device *dev)
 
 static inline void transfer_setup(struct device *dev, uint16_t slave_address)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 	uint32_t mmr;
 	uint32_t iadr;
@@ -310,7 +310,7 @@ static inline void transfer_setup(struct device *dev, uint16_t slave_address)
 
 static inline int msg_write(struct device *dev)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 
 	/* To write to slave */
@@ -330,7 +330,7 @@ static inline int msg_write(struct device *dev)
 	cfg->port->pdc.ptcr = PDC_PTCR_TXTEN;
 
 	/* Wait till transfer is done or error occurs */
-	device_sync_call_wait(&dev_data->sync);
+	k_sem_take(&dev_data->device_sync_sem, K_FOREVER);
 
 	/* Check for error */
 	if (cfg->port->sr & TWI_IRQ_NACK) {
@@ -361,7 +361,7 @@ static inline int msg_write(struct device *dev)
 
 static inline int msg_read(struct device *dev)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 	uint32_t stat_reg;
 	uint32_t ctrl_reg;
@@ -425,7 +425,7 @@ static inline int msg_read(struct device *dev)
 		cfg->port->ier = TWI_IRQ_ENDRX | TWI_IRQ_NACK | TWI_IRQ_OVRE;
 
 		/* Wait till transfer is done or error occurs */
-		device_sync_call_wait(&dev_data->sync);
+		k_sem_take(&dev_data->device_sync_sem, K_FOREVER);
 
 		/* Check for errors */
 		stat_reg = cfg->port->sr;
@@ -462,7 +462,7 @@ static int i2c_sam3_transfer(struct device *dev,
 			     struct i2c_msg *msgs, uint8_t num_msgs,
 			     uint16_t slave_address)
 {
-	struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config *const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 	struct i2c_msg *cur_msg = msgs;
 	uint8_t msg_left = num_msgs;
@@ -581,17 +581,17 @@ done:
 	return ret;
 }
 
-static struct i2c_driver_api api_funcs = {
+static const struct i2c_driver_api api_funcs = {
 	.configure = i2c_sam3_runtime_configure,
 	.transfer = i2c_sam3_transfer,
 };
 
 static int i2c_sam3_init(struct device *dev)
 {
-	struct i2c_sam3_dev_config * const cfg = dev->config->config_info;
+	const struct i2c_sam3_dev_config * const cfg = dev->config->config_info;
 	struct i2c_sam3_dev_data * const dev_data = dev->driver_data;
 
-	device_sync_call_init(&dev_data->sync);
+	k_sem_init(&dev_data->device_sync_sem, 0, UINT_MAX);
 
 	/* Disable all interrupts */
 	cfg->port->idr = TWI_IRQ_DISABLE;
@@ -612,7 +612,7 @@ static int i2c_sam3_init(struct device *dev)
 
 static void config_func_0(struct device *port);
 
-static struct i2c_sam3_dev_config dev_config_0 = {
+static const struct i2c_sam3_dev_config dev_config_0 = {
 	.port = __TWI0,
 	.config_func = config_func_0,
 };
@@ -623,7 +623,7 @@ static struct i2c_sam3_dev_data dev_data_0 = {
 
 DEVICE_AND_API_INIT(i2c_sam3_0, CONFIG_I2C_0_NAME, &i2c_sam3_init,
 		    &dev_data_0, &dev_config_0,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &api_funcs);
 
 static void config_func_0(struct device *dev)
@@ -642,7 +642,7 @@ static void config_func_0(struct device *dev)
 
 static void config_func_1(struct device *port);
 
-static struct i2c_sam3_dev_config dev_config_1 = {
+static const struct i2c_sam3_dev_config dev_config_1 = {
 	.port = __TWI1,
 	.config_func = config_func_1,
 };
@@ -653,7 +653,7 @@ static struct i2c_sam3_dev_data dev_data_1 = {
 
 DEVICE_AND_API_INIT(i2c_sam3_1, CONFIG_I2C_1_NAME, &i2c_sam3_init,
 		    &dev_data_1, &dev_config_1,
-		    SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &api_funcs);
 
 static void config_func_1(struct device *dev)

@@ -20,7 +20,7 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
+#include <kernel.h>
 
 #include <i2c.h>
 #include <pwm.h>
@@ -156,7 +156,7 @@ static int pwm_pca9685_set_duty_cycle(struct device *dev, int access_op,
 	return pwm_pca9685_set_values(dev, access_op, pwm, on, off);
 }
 
-static struct pwm_driver_api pwm_pca9685_drv_api_funcs = {
+static const struct pwm_driver_api pwm_pca9685_drv_api_funcs = {
 	.config = pwm_pca9685_configure,
 	.set_values = pwm_pca9685_set_values,
 	.set_duty_cycle = pwm_pca9685_set_duty_cycle,
@@ -205,7 +205,7 @@ int pwm_pca9685_init(struct device *dev)
 #include <device.h>
 #include <init.h>
 
-static struct pwm_pca9685_config pwm_pca9685_0_cfg = {
+static const struct pwm_pca9685_config pwm_pca9685_0_cfg = {
 	.i2c_master_dev_name = CONFIG_PWM_PCA9685_0_I2C_MASTER_DEV_NAME,
 	.i2c_slave_addr = CONFIG_PWM_PCA9685_0_I2C_ADDR,
 };
@@ -216,6 +216,6 @@ static struct pwm_pca9685_drv_data pwm_pca9685_0_drvdata;
 DEVICE_INIT(pwm_pca9685_0, CONFIG_PWM_PCA9685_0_DEV_NAME,
 			pwm_pca9685_init,
 			&pwm_pca9685_0_drvdata, &pwm_pca9685_0_cfg,
-			SECONDARY, CONFIG_PWM_PCA9685_INIT_PRIORITY);
+			POST_KERNEL, CONFIG_PWM_PCA9685_INIT_PRIORITY);
 
 #endif /* CONFIG_PWM_PCA9685_0 */

@@ -25,7 +25,7 @@
 
 static int aon_counter_qmsi_start(struct device *dev)
 {
-	if (qm_aonc_enable(QM_SCSS_AON_0)) {
+	if (qm_aonc_enable(QM_AONC_0)) {
 		return -EIO;
 	}
 
@@ -34,16 +34,16 @@ static int aon_counter_qmsi_start(struct device *dev)
 
 static int aon_counter_qmsi_stop(struct device *dev)
 {
-	qm_aonc_disable(QM_SCSS_AON_0);
+	qm_aonc_disable(QM_AONC_0);
 
 	return 0;
 }
 
-static uint32_t aon_counter_qmsi_read(void)
+static uint32_t aon_counter_qmsi_read(struct device *dev)
 {
 	uint32_t value;
 
-	qm_aonc_get_value(QM_SCSS_AON_0, &value);
+	qm_aonc_get_value(QM_AONC_0, &value);
 
 	return value;
 }
@@ -55,7 +55,7 @@ static int aon_counter_qmsi_set_alarm(struct device *dev,
 	return -ENODEV;
 }
 
-struct counter_driver_api aon_counter_qmsi_api = {
+static const struct counter_driver_api aon_counter_qmsi_api = {
 	.start = aon_counter_qmsi_start,
 	.stop = aon_counter_qmsi_stop,
 	.read = aon_counter_qmsi_read,
@@ -68,6 +68,6 @@ static int aon_counter_init(struct device *dev)
 }
 
 DEVICE_AND_API_INIT(aon_counter, CONFIG_AON_COUNTER_QMSI_DEV_NAME,
-		    aon_counter_init, NULL, NULL, SECONDARY,
+		    aon_counter_init, NULL, NULL, POST_KERNEL,
 		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
-		    (void *)&aon_counter_qmsi_api);
+		    &aon_counter_qmsi_api);

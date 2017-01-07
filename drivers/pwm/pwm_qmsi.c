@@ -16,9 +16,9 @@
 
 #include <errno.h>
 
-#include <nanokernel.h>
 #include <pwm.h>
 #include <device.h>
+#include <kernel.h>
 #include <init.h>
 #include <power.h>
 
@@ -50,22 +50,15 @@
 
 struct pwm_data {
 #ifdef CONFIG_PWM_QMSI_API_REENTRANCY
-	struct nano_sem sem;
+	struct k_sem sem;
 #endif
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
 	uint32_t device_power_state;
 #endif
+	uint32_t channel_period[CONFIG_PWM_QMSI_NUM_PORTS];
 };
 
-#define PWM_HAS_CONTEXT_DATA \
-	(CONFIG_PWM_QMSI_API_REENTRANCY || CONFIG_DEVICE_POWER_MANAGEMENT)
-
-#if PWM_HAS_CONTEXT_DATA
 static struct pwm_data pwm_context;
-#define PWM_CONTEXT (&pwm_context)
-#else
-#define PWM_CONTEXT (NULL)
-#endif /* PWM_HAS_CONTEXT_DATA */
 
 #ifdef CONFIG_PWM_QMSI_API_REENTRANCY
 static const int reentrancy_protection = 1;
@@ -81,8 +74,8 @@ static void pwm_reentrancy_init(struct device *dev)
 		return;
 	}
 
-	nano_sem_init(RP_GET(dev));
-	nano_sem_give(RP_GET(dev));
+	k_sem_init(RP_GET(dev), 0, UINT_MAX);
+	k_sem_give(RP_GET(dev));
 }
 
 static void pwm_critical_region_start(struct device *dev)
@@ -91,7 +84,7 @@ static void pwm_critical_region_start(struct device *dev)
 		return;
 	}
 
-	nano_sem_take(RP_GET(dev), TICKS_UNLIMITED);
+	k_sem_take(RP_GET(dev), K_FOREVER);
 }
 
 static void pwm_critical_region_end(struct device *dev)
@@ -100,10 +93,8 @@ static void pwm_critical_region_end(struct device *dev)
 		return;
 	}
 
-	nano_sem_give(RP_GET(dev));
+	k_sem_give(RP_GET(dev));
 }
-
-static uint32_t  pwm_channel_period[CONFIG_PWM_QMSI_NUM_PORTS];
 
 static int pwm_qmsi_configure(struct device *dev, int access_op,
 				 uint32_t pwm, int flags)
@@ -146,6 +137,7 @@ static int __set_one_port(struct device *dev, qm_pwm_t id, uint32_t pwm,
 	/* No interrupts */
 	cfg.mask_interrupt = true;
 	cfg.callback = NULL;
+	cfg.callback_data = NULL;
 
 	/* Data for the timer to stay high and low */
 	cfg.hi_count = on;
@@ -190,7 +182,8 @@ pwm_set_port_return:
 static int pwm_qmsi_set_values(struct device *dev, int access_op,
 			       uint32_t pwm, uint32_t on, uint32_t off)
 {
-	uint32_t *channel_period = dev->config->config_info;
+	struct pwm_data *context = dev->driver_data;
+	uint32_t *channel_period = context->channel_period;
 	int i, high, low;
 
 	if (on) {
@@ -234,7 +227,9 @@ static int pwm_qmsi_set_values(struct device *dev, int access_op,
 				low = channel_period[i] - 1;
 			}
 
-			return __set_one_port(dev, QM_PWM_0, i, high, low);
+			if (__set_one_port(dev, QM_PWM_0, i, high, low) != 0) {
+				return -EIO;
+			}
 		}
 		break;
 	default:
@@ -248,7 +243,8 @@ static int pwm_qmsi_set_values(struct device *dev, int access_op,
 static int pwm_qmsi_set_period(struct device *dev, int access_op,
 			       uint32_t pwm, uint32_t period)
 {
-	uint32_t *channel_period = dev->config->config_info;
+	struct pwm_data *context = dev->driver_data;
+	uint32_t *channel_period = context->channel_period;
 	int ret_val = 0;
 
 	if (channel_period == NULL) {
@@ -289,7 +285,8 @@ pwm_set_period_return:
 static int pwm_qmsi_set_duty_cycle(struct device *dev, int access_op,
 				   uint32_t pwm, uint8_t duty)
 {
-	uint32_t *channel_period = dev->config->config_info;
+	struct pwm_data *context = dev->driver_data;
+	uint32_t *channel_period = context->channel_period;
 	uint32_t on, off;
 
 	if (channel_period == NULL) {
@@ -344,12 +341,80 @@ static int pwm_qmsi_set_phase(struct device *dev, int access_op,
 	return -ENOTSUP;
 }
 
-static struct pwm_driver_api pwm_qmsi_drv_api_funcs = {
+/*
+ * Set the period and pulse width for a PWM pin.
+ *
+ * For example, with a nominal system clock of 32MHz, each count represents
+ * 31.25ns (e.g. period = 100 means the pulse is to repeat every 3125ns). The
+ * duration of one count depends on system clock. Refer to the hardware manual
+ * for more information.
+ *
+ * Parameters
+ * dev: Pointer to PWM device structure
+ * pwm: PWM port number to set
+ * period_cycles: Period (in timer count)
+ * pulse_cycles: Pulse width (in timer count).
+ *
+ * return 0, or negative errno code
+ */
+static int pwm_qmsi_pin_set(struct device *dev, uint32_t pwm,
+			    uint32_t period_cycles, uint32_t pulse_cycles)
+{
+	uint32_t high, low;
+
+	if (pwm >= CONFIG_PWM_QMSI_NUM_PORTS) {
+		return -EINVAL;
+	}
+
+	if (period_cycles == 0 || pulse_cycles > period_cycles) {
+		return -EINVAL;
+	}
+
+	high = pulse_cycles;
+	low = period_cycles - pulse_cycles;
+
+	/*
+	 * low must be more than zero. Otherwise, the PWM pin will be
+	 * turned off. Let's make sure low is always more than zero.
+	 */
+	if (low == 0) {
+		high--;
+		low = 1;
+	}
+
+	return __set_one_port(dev, QM_PWM_0, pwm, high, low);
+}
+
+/*
+ * Get the clock rate (cycles per second) for a PWM pin.
+ *
+ * Parameters
+ * dev: Pointer to PWM device structure
+ * pwm: PWM port number
+ * cycles: Pointer to the memory to store clock rate (cycles per second)
+ *
+ * return 0, or negative errno code
+ */
+static int pwm_qmsi_get_cycles_per_sec(struct device *dev, uint32_t pwm,
+				       uint64_t *cycles)
+{
+	if (cycles == NULL) {
+		return -EINVAL;
+	}
+
+	*cycles = (uint64_t)clk_sys_get_ticks_per_us() * USEC_PER_SEC;
+
+	return 0;
+}
+
+static const struct pwm_driver_api pwm_qmsi_drv_api_funcs = {
 	.config = pwm_qmsi_configure,
 	.set_values = pwm_qmsi_set_values,
 	.set_period = pwm_qmsi_set_period,
 	.set_duty_cycle = pwm_qmsi_set_duty_cycle,
-	.set_phase = pwm_qmsi_set_phase
+	.set_phase = pwm_qmsi_set_phase,
+	.pin_set = pwm_qmsi_pin_set,
+	.get_cycles_per_sec = pwm_qmsi_get_cycles_per_sec,
 };
 
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
@@ -365,7 +430,8 @@ static void pwm_qmsi_set_power_state(struct device *dev, uint32_t power_state)
 
 static int pwm_qmsi_init(struct device *dev)
 {
-	uint32_t *channel_period = dev->config->config_info;
+	struct pwm_data *context = dev->driver_data;
+	uint32_t *channel_period = context->channel_period;
 
 	for (int i = 0; i < CONFIG_PWM_QMSI_NUM_PORTS; i++) {
 		channel_period[i] = DEFAULT_PERIOD *
@@ -382,19 +448,6 @@ static int pwm_qmsi_init(struct device *dev)
 }
 
 #ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-struct pwm_channel_ctx {
-	uint32_t loadcount1;
-	uint32_t loadcount2;
-	uint32_t controlreg;
-};
-
-struct pwm_ctx {
-	struct pwm_channel_ctx channels[CONFIG_PWM_QMSI_NUM_PORTS];
-	uint32_t int_pwm_timer_mask;
-};
-
-static struct pwm_ctx pwm_ctx_save;
-
 static uint32_t pwm_qmsi_get_power_state(struct device *dev)
 {
 	struct pwm_data *context = dev->driver_data;
@@ -402,44 +455,27 @@ static uint32_t pwm_qmsi_get_power_state(struct device *dev)
 	return context->device_power_state;
 }
 
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
+static qm_pwm_context_t pwm_ctx;
+
 static int pwm_qmsi_suspend(struct device *dev)
 {
-	int i;
+	qm_pwm_save_context(QM_PWM_0, &pwm_ctx);
 
-	pwm_ctx_save.int_pwm_timer_mask =
-		QM_SCSS_INT->int_pwm_timer_mask;
-	for (i = 0; i < CONFIG_PWM_QMSI_NUM_PORTS; i++) {
-		qm_pwm_channel_t *channel;
-		struct pwm_channel_ctx *channel_save;
-
-		channel = &QM_PWM->timer[i];
-		channel_save = &pwm_ctx_save.channels[i];
-		channel_save->loadcount1 = channel->loadcount;
-		channel_save->controlreg = channel->controlreg;
-		channel_save->loadcount2 = QM_PWM->timer_loadcount2[i];
-	}
 	pwm_qmsi_set_power_state(dev, DEVICE_PM_SUSPEND_STATE);
+
 	return 0;
 }
 
 static int pwm_qmsi_resume_from_suspend(struct device *dev)
 {
-	int i;
+	qm_pwm_restore_context(QM_PWM_0, &pwm_ctx);
 
-	for (i = 0; i < CONFIG_PWM_QMSI_NUM_PORTS; i++) {
-		qm_pwm_channel_t *channel;
-		struct pwm_channel_ctx *channel_save;
-
-		channel = &QM_PWM->timer[i];
-		channel_save = &pwm_ctx_save.channels[i];
-		channel->loadcount = channel_save->loadcount1;
-		channel->controlreg = channel_save->controlreg;
-		QM_PWM->timer_loadcount2[i] = channel_save->loadcount2;
-	}
-	QM_SCSS_INT->int_pwm_timer_mask = pwm_ctx_save.int_pwm_timer_mask;
 	pwm_qmsi_set_power_state(dev, DEVICE_PM_ACTIVE_STATE);
+
 	return 0;
 }
+#endif
 
 /*
 * Implements the driver control management functionality
@@ -449,11 +485,13 @@ static int pwm_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 				void *context)
 {
 	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP
 		if (*((uint32_t *)context) == DEVICE_PM_SUSPEND_STATE) {
 			return pwm_qmsi_suspend(dev);
 		} else if (*((uint32_t *)context) == DEVICE_PM_ACTIVE_STATE) {
 			return pwm_qmsi_resume_from_suspend(dev);
 		}
+#endif
 	} else if (ctrl_command == DEVICE_PM_GET_POWER_STATE) {
 		*((uint32_t *)context) = pwm_qmsi_get_power_state(dev);
 		return 0;
@@ -464,6 +502,6 @@ static int pwm_qmsi_device_ctrl(struct device *dev, uint32_t ctrl_command,
 #endif
 
 DEVICE_DEFINE(pwm_qmsi_0, CONFIG_PWM_QMSI_DEV_NAME, pwm_qmsi_init,
-	      pwm_qmsi_device_ctrl, PWM_CONTEXT, pwm_channel_period,
-	      SECONDARY, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
-	      (void *)&pwm_qmsi_drv_api_funcs);
+	      pwm_qmsi_device_ctrl, &pwm_context, NULL,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+	      &pwm_qmsi_drv_api_funcs);

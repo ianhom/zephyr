@@ -19,7 +19,7 @@
  * @brief System/hardware module for STM32F1 processor
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <device.h>
 #include <init.h>
 #include <soc.h>
@@ -60,7 +60,10 @@ static int stm32f1_init(struct device *arg)
 
 	irq_unlock(key);
 
+	/* Update CMSIS SystemCoreClock variable (HCLK) */
+	SystemCoreClock = CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC;
+
 	return 0;
 }
 
-SYS_INIT(stm32f1_init, PRIMARY, 0);
+SYS_INIT(stm32f1_init, PRE_KERNEL_1, 0);

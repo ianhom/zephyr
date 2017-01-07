@@ -81,6 +81,22 @@ typedef int (*pwm_set_phase_t)(struct device *dev, int access_op,
 typedef int (*pwm_set_period_t)(struct device *dev, int access_op,
 				uint32_t pwm, uint32_t period);
 
+/**
+ * @typedef pwm_pin_set_t
+ * @brief Callback API upon setting the pin
+ * See @a pwm_pin_set_cycles() for argument description
+ */
+typedef int (*pwm_pin_set_t)(struct device *dev, uint32_t pwm,
+			     uint32_t period_cycles, uint32_t pulse_cycles);
+
+/**
+ * @typedef pwm_get_cycles_per_sec_t
+ * @brief Callback API upon getting cycles per second
+ * See @a pwm_get_cycles_per_sec() for argument description
+ */
+typedef int (*pwm_get_cycles_per_sec_t)(struct device *dev, uint32_t pwm,
+					uint64_t *cycles);
+
 /** @brief PWM driver API definition. */
 struct pwm_driver_api {
 	pwm_config_t config;
@@ -88,10 +104,91 @@ struct pwm_driver_api {
 	pwm_set_period_t set_period;
 	pwm_set_duty_cycle_t set_duty_cycle;
 	pwm_set_phase_t set_phase;
+	pwm_pin_set_t pin_set;
+	pwm_get_cycles_per_sec_t get_cycles_per_sec;
 };
 
 /**
+ * @brief Set the period and pulse width for a single PWM output.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ * @param pwm PWM pin.
+ * @param period Period (in clock cycle) set to the PWM. HW specific.
+ * @param pulse Pulse width (in clock cycle) set to the PWM. HW specific.
+ *
+ * @retval 0 If successful.
+ * @retval Negative errno code if failure.
+ */
+static inline int pwm_pin_set_cycles(struct device *dev, uint32_t pwm,
+				     uint32_t period, uint32_t pulse)
+{
+	struct pwm_driver_api *api;
+
+	api = (struct pwm_driver_api *)dev->driver_api;
+	return api->pin_set(dev, pwm, period, pulse);
+}
+
+/**
+ * @brief Set the period and pulse width for a single PWM output.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ * @param pwm PWM pin.
+ * @param period Period (in micro second) set to the PWM.
+ * @param pulse Pulse width (in micro second) set to the PWM.
+ *
+ * @retval 0 If successful.
+ * @retval Negative errno code if failure.
+ */
+static inline int pwm_pin_set_usec(struct device *dev, uint32_t pwm,
+				   uint32_t period, uint32_t pulse)
+{
+	struct pwm_driver_api *api;
+	uint64_t period_cycles, pulse_cycles, cycles_per_sec;
+
+	api = (struct pwm_driver_api *)dev->driver_api;
+
+	if (api->get_cycles_per_sec(dev, pwm, &cycles_per_sec) != 0) {
+		return -EIO;
+	}
+
+	period_cycles = (period * cycles_per_sec) / USEC_PER_SEC;
+	if (period_cycles >= ((uint64_t)1 << 32)) {
+		return -ENOTSUP;
+	}
+
+	pulse_cycles = (pulse * cycles_per_sec) / USEC_PER_SEC;
+	if (pulse_cycles >= ((uint64_t)1 << 32)) {
+		return -ENOTSUP;
+	}
+
+	return api->pin_set(dev, pwm, (uint32_t)period_cycles,
+			    (uint32_t)pulse_cycles);
+}
+
+/**
+ * @brief Get the clock rate (cycles per second) for a single PWM output.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ * @param pwm PWM pin.
+ * @param cycles Pointer to the memory to store clock rate (cycles per sec).
+ *		 HW specific.
+ *
+ * @retval 0 If successful.
+ * @retval Negative errno code if failure.
+ */
+static inline int pwm_get_cycles_per_sec(struct device *dev, uint32_t pwm,
+					 uint64_t *cycles)
+{
+	struct pwm_driver_api *api;
+
+	api = (struct pwm_driver_api *)dev->driver_api;
+	return api->get_cycles_per_sec(dev, pwm, cycles);
+}
+
+/**
  * @brief Configure a single PWM output.
+ *
+ * @deprecated This API will be deprecated.
  *
  * @param dev Pointer to the device structure for the driver instance.
  * @param pwm PWM output.
@@ -100,17 +197,19 @@ struct pwm_driver_api {
  * @retval 0 If successful,
  * @retval Negative errno code if failure.
  */
-static inline int pwm_pin_configure(struct device *dev, uint8_t pwm,
-				    int flags)
+static inline int __deprecated pwm_pin_configure(struct device *dev,
+						 uint8_t pwm, int flags)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->config(dev, PWM_ACCESS_BY_PIN, pwm, flags);
 }
 
 /**
  * @brief Set the ON/OFF values for a single PWM output.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_cycles.
  *
  * @param dev Pointer to the device structure for the driver instance.
  * @param pwm PWM output.
@@ -122,17 +221,20 @@ static inline int pwm_pin_configure(struct device *dev, uint8_t pwm,
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_pin_set_values(struct device *dev, uint32_t pwm,
-				     uint32_t on, uint32_t off)
+static inline int __deprecated pwm_pin_set_values(struct device *dev,
+						  uint32_t pwm, uint32_t on,
+						  uint32_t off)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_values(dev, PWM_ACCESS_BY_PIN, pwm, on, off);
 }
 
 /**
  * @brief Set the period of a single PWM output.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_usec.
  *
  * It is optional to call this API. If not called, there is a default
  * period.
@@ -144,17 +246,20 @@ static inline int pwm_pin_set_values(struct device *dev, uint32_t pwm,
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_pin_set_period(struct device *dev, uint32_t pwm,
-				     uint32_t period)
+static inline int __deprecated pwm_pin_set_period(struct device *dev,
+						  uint32_t pwm,
+						  uint32_t period)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_period(dev, PWM_ACCESS_BY_PIN, pwm, period);
 }
 
 /**
  * @brief Set the duty cycle of a single PWM output.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_cycles or pwm_pin_set_usec.
  *
  * This routine overrides any ON/OFF values set before.
  *
@@ -166,17 +271,20 @@ static inline int pwm_pin_set_period(struct device *dev, uint32_t pwm,
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_pin_set_duty_cycle(struct device *dev, uint32_t pwm,
-					 uint8_t duty)
+static inline int __deprecated pwm_pin_set_duty_cycle(struct device *dev,
+						      uint32_t pwm,
+						      uint8_t duty)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_duty_cycle(dev, PWM_ACCESS_BY_PIN, pwm, duty);
 }
 
 /**
  * @brief Set the phase of a single PWM output.
+ *
+ * @deprecated This API will be deprecated. Set_phase will not be supported
+ *	       any more.
  *
  * This routine sets the delay before pulses.
  *
@@ -187,12 +295,10 @@ static inline int pwm_pin_set_duty_cycle(struct device *dev, uint32_t pwm,
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_pin_set_phase(struct device *dev, uint32_t pwm,
-				    uint8_t phase)
+static inline int __deprecated pwm_pin_set_phase(struct device *dev,
+						 uint32_t pwm, uint8_t phase)
 {
-	struct pwm_driver_api *api;
-
-	api = (struct pwm_driver_api *)dev->driver_api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
 	if ((api != NULL) && (api->set_phase != NULL)) {
 		return api->set_phase(dev, PWM_ACCESS_BY_PIN, pwm, phase);
@@ -204,22 +310,27 @@ static inline int pwm_pin_set_phase(struct device *dev, uint32_t pwm,
 /**
  * @brief Configure all the PWM outputs.
  *
+ * @deprecated This API will be deprecated.
+ *
  * @param dev Pointer to the device structure for the driver instance.
  * @param flags PWM configuration flags.
  *
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_all_configure(struct device *dev, int flags)
+static inline int __deprecated pwm_all_configure(struct device *dev, int flags)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->config(dev, PWM_ACCESS_ALL, 0, flags);
 }
 
 /**
  * @brief Set the ON/OFF values for all PWM outputs.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_cycles or pwm_pin_set_usec to set the pins
+ *	       individually.
  *
  * @param dev Pointer to the device structure for the driver instance.
  * @param on ON value (number of timer count) set to the PWM. HW specific.
@@ -230,17 +341,20 @@ static inline int pwm_all_configure(struct device *dev, int flags)
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_all_set_values(struct device *dev,
-				     uint32_t on, uint32_t off)
+static inline int __deprecated pwm_all_set_values(struct device *dev,
+						  uint32_t on, uint32_t off)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_values(dev, PWM_ACCESS_ALL, 0, on, off);
 }
 
 /**
  * @brief Set the period of all PWM outputs.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_cycles or pwm_pin_set_usec to set the pins
+ *	       individually.
  *
  * It is optional to call this API. If not called, there is a default
  * period.
@@ -251,16 +365,20 @@ static inline int pwm_all_set_values(struct device *dev,
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_all_period(struct device *dev, uint32_t period)
+static inline int __deprecated pwm_all_period(struct device *dev,
+					      uint32_t period)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_period(dev, PWM_ACCESS_ALL, 0, period);
 }
 
 /**
  * @brief Set the duty cycle of all PWM outputs.
+ *
+ * @deprecated This API will be deprecated. Please use the new API
+ *	       pwm_pin_set_cycles or pwm_pin_set_usec to set the pins
+ *	       individually.
  *
  * This overrides any ON/OFF values being set before.
  *
@@ -271,16 +389,19 @@ static inline int pwm_all_period(struct device *dev, uint32_t period)
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_all_set_duty_cycle(struct device *dev, uint8_t duty)
+static inline int __deprecated pwm_all_set_duty_cycle(struct device *dev,
+						      uint8_t duty)
 {
-	struct pwm_driver_api *api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
-	api = (struct pwm_driver_api *)dev->driver_api;
 	return api->set_duty_cycle(dev, PWM_ACCESS_ALL, 0, duty);
 }
 
 /**
  * @brief Set the phase of all PWM outputs.
+ *
+ * @deprecated This API will be deprecated. Set_phase will not be supported
+ *	       any more.
  *
  * This routine sets the delay before pulses.
  *
@@ -290,11 +411,10 @@ static inline int pwm_all_set_duty_cycle(struct device *dev, uint8_t duty)
  * @retval 0 If successful.
  * @retval Negative errno code if failure.
  */
-static inline int pwm_all_set_phase(struct device *dev, uint8_t phase)
+static inline int __deprecated pwm_all_set_phase(struct device *dev,
+						 uint8_t phase)
 {
-	struct pwm_driver_api *api;
-
-	api = (struct pwm_driver_api *)dev->driver_api;
+	const struct pwm_driver_api *api = dev->driver_api;
 
 	if ((api != NULL) && (api->set_phase != NULL)) {
 		return api->set_phase(dev, PWM_ACCESS_ALL, 0, phase);

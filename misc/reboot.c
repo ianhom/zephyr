@@ -20,7 +20,7 @@
  * @details See misc/Kconfig and the reboot help for details.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <drivers/system_timer.h>
 #include <misc/printk.h>
 #include <misc/reboot.h>
@@ -37,6 +37,6 @@ void sys_reboot(int type)
 	/* should never get here */
 	printk("Failed to reboot: spinning endlessly...\n");
 	for (;;) {
-		nano_cpu_idle();
+		k_cpu_idle();
 	}
 }

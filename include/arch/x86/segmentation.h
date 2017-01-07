@@ -236,9 +236,9 @@ struct __packed segment_descriptor {
 			uint8_t avl:1;		/* CPU ignores this */
 
 			/* 1=Indicates 64-bit code segment in IA-32e mode */
-			uint8_t flags_l:1;
+			uint8_t flags_l:1; /* L field */
 
-			uint8_t size:1;
+			uint8_t db:1; /* D/B field 1=32-bit 0=16-bit*/
 			uint8_t granularity:1;
 
 			uint8_t base_hi;	/* Bits 24-31 */
@@ -287,7 +287,7 @@ struct __packed far_ptr {
 	.limit_hi = (((limit_p) >> 16) & 0xF), \
 	.granularity = (granularity_p), \
 	.flags_l = 0, \
-	.size = 1, \
+	.db = 1, \
 	.avl = 0
 
 #define _SEGMENT_AND_OFFSET(segment_p, offset_p) \
@@ -554,7 +554,18 @@ static inline void _set_ldt(uint16_t ldt)
  */
 static inline void _set_gdt(const struct pseudo_descriptor *gdt)
 {
-	__asm__ __volatile__ ("lgdt %0" :: "m" (gdt));
+	__asm__ __volatile__ ("lgdt %0" :: "m" (*gdt));
+}
+
+
+/**
+ * Set the interrupt descriptor table
+ *
+ * @param idt Pointer to IDT pseudo descriptor.
+ */
+static inline void _set_idt(const struct pseudo_descriptor *idt)
+{
+	__asm__ __volatile__ ("lidt %0" :: "m" (*idt));
 }
 
 

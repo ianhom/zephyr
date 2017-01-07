@@ -47,31 +47,17 @@
  * non-timer interrupt to occur. When the CPU ceases idling the driver
  * determines how many complete ticks have elapsed, reprograms the timer so that
  * it expires on the next tick, and announces the number of elapsed ticks (if
- * any) to the microkernel.
+ * any) to the kernel.
  *
- * In a nanokernel-only system this device driver omits more complex
- * capabilities (such as tickless idle support) that are only used with a
- * microkernel.
  */
 
-#include <nanokernel.h>
+#include <kernel.h>
 #include <toolchain.h>
 #include <sections.h>
 #include <sys_clock.h>
 #include <drivers/ioapic.h>
 #include <drivers/system_timer.h>
-#include <nano_private.h>
-
-#if !defined(CONFIG_KERNEL_V2)
-#ifdef CONFIG_MICROKERNEL
-
-#include <microkernel.h>
-
-extern struct nano_stack _k_command_stack;
-
-#endif /*  CONFIG_MICROKERNEL */
-#endif
-
+#include <kernel_structs.h>
 
 #include <board.h>
 
@@ -192,9 +178,9 @@ extern uint32_t _hw_irq_to_c_handler_latency;
 
 #ifdef CONFIG_HPET_TIMER_DEBUG
 #include <misc/printk.h>
-#define PRINTK(...) printk(__VA_ARGS__)
+#define DBG(...) printk(__VA_ARGS__)
 #else
-#define PRINTK(...)
+#define DBG(...)
 #endif
 
 #ifdef CONFIG_TICKLESS_IDLE
@@ -243,7 +229,7 @@ static uint64_t _hpetMainCounterAtomic(void)
  * @brief System clock tick handler
  *
  * This routine handles the system clock tick interrupt. A TICK_EVENT event
- * is pushed onto the microkernel stack.
+ * is pushed onto the kernel stack.
  *
  * @return N/A
  */
@@ -376,9 +362,9 @@ void _timer_idle_exit(void)
 		_sys_idle_elapsed_ticks = programmed_ticks - 1;
 
 		/*
-		 * Announce elapsed ticks to the microkernel. Note we are
-		 * guaranteed that the timer ISR will execute first before the
-		 * tick event is serviced.
+		 * Announce elapsed ticks to the kernel. Note we are guaranteed
+		 * that the timer ISR will execute first before the tick event
+		 * is serviced.
 		 */
 		_sys_clock_tick_announce();
 
@@ -398,7 +384,7 @@ void _timer_idle_exit(void)
 	 * and program the timer for the tick after that
 	 *
 	 * note: a premature tick declaration has no significant impact on
-	 * the microkernel, which gets informed of the correct number of elapsed
+	 * the kernel, which gets informed of the correct number of elapsed
 	 * ticks when the following tick finally occurs; however, any ISRs that
 	 * access _sys_idle_elapsed_ticks to determine the current time may be
 	 * misled during the (very brief) interval before the tick-in-progress
@@ -430,7 +416,7 @@ void _timer_idle_exit(void)
 	_sys_idle_elapsed_ticks = elapsedTicks;
 
 	if (_sys_idle_elapsed_ticks) {
-		/* Announce elapsed ticks to the microkernel */
+		/* Announce elapsed ticks to the kernel */
 		_sys_clock_tick_announce();
 	}
 
@@ -503,11 +489,11 @@ int _sys_clock_driver_init(struct device *device)
 
 	counter_load_value = (uint32_t)(tickFempto / hpetClockPeriod);
 
-	PRINTK("\n\nHPET: configuration: 0x%x, clock period: 0x%x (%d pico-s)\n",
+	DBG("\n\nHPET: configuration: 0x%x, clock period: 0x%x (%d pico-s)\n",
 	       (uint32_t)(*_HPET_GENERAL_CAPS),
 	       (uint32_t)hpetClockPeriod, (uint32_t)hpetClockPeriod / 1000);
 
-	PRINTK("HPET: timer0: available interrupts mask 0x%x\n",
+	DBG("HPET: timer0: available interrupts mask 0x%x\n",
 	       (uint32_t)(*_HPET_TIMER0_CONFIG_CAPS >> 32));
 
 	/* Initialize sys_clock_hw_cycles_per_tick/sec */
@@ -617,11 +603,7 @@ int _sys_clock_driver_init(struct device *device)
  * it will need to call _hpetMainCounterAtomic().
  */
 
-#ifdef CONFIG_KERNEL_V2
 uint32_t k_cycle_get_32(void)
-#else
-uint32_t sys_cycle_get_32(void)
-#endif
 {
 	return (uint32_t) *_HPET_MAIN_COUNTER_VALUE;
 }

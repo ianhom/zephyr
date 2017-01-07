@@ -16,8 +16,8 @@
 
 #define _ASMLANGUAGE
 #include <arch/nios2/asm.h>
-#include <nano_private.h>
-#include <offsets.h>
+#include <kernel_structs.h>
+#include <offsets_short.h>
 
 /* exports */
 GTEXT(_exception)
@@ -93,11 +93,11 @@ SECTION_FUNC(exception.entry, _exception)
 is_interrupt:
 	/* If we get here, this is an interrupt */
 
-	/* Grab a reference to _nanokernel in r10 so we can determine the
+	/* Grab a reference to _kernel in r10 so we can determine the
 	 * current irq stack pointer
 	 */
-	movhi r10, %hi(_nanokernel)
-	ori r10, r10, %lo(_nanokernel)
+	movhi r10, %hi(_kernel)
+	ori r10, r10, %lo(_kernel)
 
 	/* Stash a copy of thread's sp in r12 so that we can put it on the IRQ
 	 * stack
@@ -105,7 +105,7 @@ is_interrupt:
 	mov r12, sp
 
 	/* Switch to interrupt stack */
-	ldw sp, __tNANO_irq_sp_OFFSET(r10)
+	ldw sp, _kernel_offset_to_irq_stack(r10)
 
 	/* Store thread stack pointer onto IRQ stack */
 	addi sp, sp, -4
@@ -121,27 +121,27 @@ on_irq_stack:
 	/* Interrupt handler finished and the interrupt should be serviced
 	 * now, the appropriate bits in ipending should be cleared */
 
-	/* Get a reference to _nanokernel again in r10 */
-	movhi r10, %hi(_nanokernel)
-	ori   r10, r10, %lo(_nanokernel)
+	/* Get a reference to _kernel again in r10 */
+	movhi r10, %hi(_kernel)
+	ori   r10, r10, %lo(_kernel)
 
-	/* Determine whether the execution of the ISR requires a context
-	 * switch.  If the interrupted thread is PREEMPTIBLE (a task) and
-	 * _nanokernel.fiber is non-NULL, a _Swap() needs to occur.
+#ifdef CONFIG_PREEMPT_ENABLED
+	ldw   r11, _kernel_offset_to_current(r10)
+	/* Determine whether the exception of the ISR requires context
+	 * switch
 	 */
 
-	/* Check (_nanokernel.current->flags & PREEMPTIBLE), if not
-	 * goto no_reschedule
-	 */
-	ldw  r11, __tNANO_current_OFFSET(r10)
-	ldw  r12, __tTCS_flags_OFFSET(r11)
-	movi r13, PREEMPTIBLE
-	and  r12, r13, r12
-	beq  r12, zero, no_reschedule
+	/* Do not reschedule coop threads (threads that have negative prio) */
+	ldw  r12, _thread_offset_to_prio(r11)
+	blt  r12, zero, no_reschedule
 
-	/* Check _nanokernel.fiber != NULL, if NULL goto no_reschedule */
-	ldw  r11, __tNANO_fiber_OFFSET(r10)
-	beq  r11, zero, no_reschedule
+	/* Do not reschedule if scheduler is locked */
+	ldw  r12, _thread_offset_to_sched_locked(r11)
+	bne  r12, zero, no_reschedule
+
+	/* Call into the kernel to see if a scheduling decision is necessary */
+	ldw  r2, _kernel_offset_to_ready_q_cache(r10)
+	beq  r2, r11, no_reschedule
 
 	/*
 	 * A context reschedule is required: keep the volatile registers of
@@ -165,6 +165,9 @@ on_irq_stack:
 
 	call _Swap
 	jmpi _exception_exit
+#else
+	jmpi no_reschedule
+#endif /* CONFIG_PREEMPT_ENABLED */
 
 not_interrupt:
 

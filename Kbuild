@@ -33,7 +33,7 @@ define filechk_prj.mdef
 	echo "% ==============";\
 	echo "  TASKGROUP EXE";\
 	echo "  TASKGROUP SYS";\
-	echo "  TASKGROUP FPU";\
+	echo "  TASKGROUP FPU_LEGACY";\
 	echo $(TASKGROUP_SSE);\
 	echo; \
 	if test -e "$(MDEF_FILE_PATH)"; then \
@@ -49,12 +49,10 @@ sysgen_cmd=$(strip \
 	$(PYTHON) $(srctree)/scripts/sysgen \
 	-i $(CURDIR)/misc/generated/sysgen/prj.mdef \
 	-o $(CURDIR)/misc/generated/sysgen/ \
-	-k $(if $(CONFIG_KERNEL_V2),unified,micro) \
 )
 
 misc/generated/sysgen/kernel_main.c: misc/generated/sysgen/prj.mdef \
-				     kernel/microkernel/include/micro_private_types.h \
-				     kernel/microkernel/include/kernel_main.h
+				     $(srctree)/scripts/sysgen
 	$(Q)$(sysgen_cmd)
 
 define filechk_configs.c
@@ -90,21 +88,11 @@ define rule_cc_o_c_1
 	$(call echo-cmd,cc_o_c_1) $(cmd_cc_o_c_1);
 endef
 
-ifeq ($(CONFIG_KERNEL_V2),y)
-OFFSETS_INCLUDE_KERNEL_LOCATION=$(strip \
-	-I $(srctree)/kernel/unified/include \
-)
-else
-OFFSETS_INCLUDE_KERNEL_LOCATION=$(strip \
-	-I $(srctree)/kernel/microkernel/include \
-	-I $(srctree)/kernel/nanokernel/include \
-)
-endif
-
 OFFSETS_INCLUDE = $(strip \
 		-include $(CURDIR)/include/generated/autoconf.h \
 		-I $(srctree)/include \
 		-I $(CURDIR)/include/generated \
+		-I $(srctree)/kernel/include \
 		$(OFFSETS_INCLUDE_KERNEL_LOCATION) \
 		-I $(srctree)/lib/libc/minimal/include \
 		-I $(srctree)/arch/${ARCH}/include )
